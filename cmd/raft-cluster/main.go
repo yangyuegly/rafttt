@@ -5,7 +5,7 @@ import (
 	"log"
 
 	"github.com/abiosoft/ishell"
-	"github.com/brown-csci1380/stencil-s20/raft/raft"
+	"github.com/brown-csci1380-s20/raft-yyang149-kboonyap/raft"
 )
 
 var numNodes int

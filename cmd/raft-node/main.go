@@ -8,8 +8,8 @@ import (
 	"strconv"
 
 	"github.com/abiosoft/ishell"
-	"github.com/brown-csci1380/stencil-s20/raft/hashmachine"
-	"github.com/brown-csci1380/stencil-s20/raft/raft"
+	"github.com/brown-csci1380-s20/raft-yyang149-kboonyap/hashmachine"
+	"github.com/brown-csci1380-s20/raft-yyang149-kboonyap/raft"
 )
 
 // RaftNode is wrapper for raft.Node
