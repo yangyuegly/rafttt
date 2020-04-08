@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"math/rand"
 	"net"
 	"os"
 	"syscall"
@@ -48,8 +49,9 @@ func AddrToID(addr string, length int) string {
 
 // randomTimeout uses time.After to create a timeout between minTimeout and 2x that.
 func randomTimeout(minTimeout time.Duration) <-chan time.Time {
-	// TODO: Students should implement this method
-	return nil
+	ticks := rand.Int63() % int64(minTimeout/time.Nanosecond)
+	d := time.Duration(ticks)*time.Nanosecond + minTimeout
+	return time.After(d)
 }
 
 // createCacheID creates a unique ID to store a client request and corresponding

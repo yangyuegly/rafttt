@@ -89,6 +89,15 @@ func (r *Node) LastLogIndex() uint64 {
 	return r.stableStore.LastLogIndex()
 }
 
+// LastLogTerm returns the term of last log. If no log exists, it returns 0.
+func (r *Node) LastLogTerm() uint64 {
+	lastEntry := r.GetLog(r.LastLogIndex())
+	if lastEntry == nil {
+		return 0
+	}
+	return lastEntry.TermId
+}
+
 // StoreLog appends log to log entry. Should always succeed
 func (r *Node) StoreLog(log *LogEntry) {
 	err := r.stableStore.StoreLog(log)

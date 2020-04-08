@@ -5,10 +5,19 @@ func (r *Node) doLeader() stateFunction {
 	r.Out("Transitioning to LeaderState")
 	r.State = LeaderState
 
-	// TODO: Students should implement this method
-	// Hint: perform any initial work, and then consider what a node in the
-	// leader state should do when it receives an incoming message on every
-	// possible channel.
+	for {
+		select {
+		case shutdown := <-r.gracefulExit:
+			if shutdown {
+				return nil
+			}
+		case appEn := <-r.appendEntries:
+		case reqVote := <-r.requestVote:
+		case regCli := <-r.registerClient:
+		case cliReq := <-r.clientRequest:
+		}
+	}
+
 	return nil
 }
 
