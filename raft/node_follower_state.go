@@ -14,7 +14,7 @@ func (r *Node) doFollower() stateFunction {
 				return nil
 			}
 		case appEn := <-r.appendEntries:
-			resetTimeout, fallback := r.handleAppendEntries(appEn)
+			resetTimeout, _ := r.handleAppendEntries(appEn)
 			if resetTimeout {
 				timeout = randomTimeout(r.config.HeartbeatTimeout)
 			}
@@ -85,51 +85,64 @@ func (r *Node) isUpToDate(lastLogTerm uint64, lastLogIndex uint64) bool {
 // - resetTimeout is true if the follower node should reset the election timeout
 // - fallback is true if the node should become a follower again
 func (r *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback bool) {
-	// TODO: Students should implement this method
 	req := msg.request
+	fallback = false
 
-	//if the request term is later, we should fallback
+	// if the request term is later, we should fallback
 	if req.Term > r.GetCurrentTerm() {
 		r.setCurrentTerm(req.Term)
-		if r.State!= FollowerState {
-			fallback = true
-		}
-	} 
-
-	//if we are later than the request, append entries unsuccessful
-	else if req.Term < r.GetCurrentTerm() {
-		msg.reply<- AppendEntriesReply {
-			Term: r.GetCurrentTerm()
-			Success: false;
-		}
-		return false, fallback
-	}
-	else if req.PrevLogIndex>r.LastLogIndex() || req.PrevLogTerm!=r.LastLogTerm {
+		r.setVotedFor("")
+		fallback = true
+	} else if r.State == CandidateState && req.Term == r.GetCurrentTerm() {
+		fallback = true
+	} else if req.Term < r.GetCurrentTerm() {
+		// if we are later than the request, append entries unsuccessful
 		msg.reply <- AppendEntriesReply{
-			Term: r.GetCurrentTerm()
-			Success: false;	
+			Term:    r.GetCurrentTerm(),
+			Success: false,
 		}
 		return false, fallback
 	}
 
-
-
-	start:= req.PrevLogIndex
-
-	for l:= 0; && start< r.LastLogIndex(); l < len(req.GetEntries());l++ {
-		start++; 
-		if r.GetLog(req.GetEntries()[l].Index)!=req.GetEntries()[l]
+	r.Leader = req.Leader
+	prevLog := r.GetLog(req.PrevLogIndex)
+	if prevLog == nil || prevLog.TermId != req.PrevLogTerm {
+		r.TruncateLog(req.PrevLogIndex)
+		msg.reply <- AppendEntriesReply{
+			Term:    r.GetCurrentTerm(),
+			Success: false,
+		}
+		return true, fallback
+	}
+	// check for conflict
+	for _, en := range req.Entries {
+		if r.GetLog(en.Index) != nil && r.GetLog(en.Index).TermId != en.TermId {
+			r.TruncateLog(en.Index)
+			break
+		}
 	}
 
-	TruncateLog()
+	// append entries
+	var lastNewEntry uint64
+	for _, en := range req.Entries {
+		if r.GetLog(en.Index) == nil {
+			r.StoreLog(en)
+		}
+		lastNewEntry = en.Index
+	}
+
 	if req.LeaderCommit > r.commitIndex {
-		commitIndex = math.Min(req.LeaderCommit, )
+		if req.LeaderCommit > lastNewEntry {
+			r.commitIndex = lastNewEntry
+		} else {
+			r.commitIndex = req.LeaderCommit
+		}
 	}
-
 
 	//successfully append log
 	msg.reply <- AppendEntriesReply{
-		Term: r.GetCurrentTerm()
-		Success: true;	
+		Term:    r.GetCurrentTerm(),
+		Success: true,
 	}
+	return true, fallback
 }

@@ -6,14 +6,14 @@ func (r *Node) doCandidate() stateFunction {
 	r.State = CandidateState
 
 	r.setCurrentTerm(r.GetCurrentTerm() + 1)
-	// vote for self
-	votesCount := 1
+	r.setVotedFor(r.Self.Id)
 
 	electionResults := make(chan bool, 1)
-	fallback := make(chan bool, 1)
+	fallback := make(chan bool, len(r.Peers))
 
 	timeout := randomTimeout(r.config.ElectionTimeout)
 	go r.requestVotes(electionResults, fallback, r.GetCurrentTerm())
+
 	for {
 		select {
 		case shutdown := <-r.gracefulExit:
@@ -21,12 +21,13 @@ func (r *Node) doCandidate() stateFunction {
 				return nil
 			}
 		case appEn := <-r.appendEntries:
-			resetTimeout, fallback := r.handleAppendEntries(appEn)
+			_, fallback := r.handleAppendEntries(appEn)
 			if fallback {
 				return r.doFollower
 			}
 		case reqVote := <-r.requestVote:
 			fallback := r.handleCompetingRequestVote(reqVote)
+
 			if fallback {
 				return r.doFollower
 			}
@@ -44,12 +45,16 @@ func (r *Node) doCandidate() stateFunction {
 			}
 		case <-timeout:
 			// start a new election
+			r.setCurrentTerm(r.GetCurrentTerm() + 1)
+			r.setVotedFor(r.Self.Id)
+			electionResults = make(chan bool, 1)
+			fallback = make(chan bool, 1)
 
+			timeout = randomTimeout(r.config.ElectionTimeout)
+			go r.requestVotes(electionResults, fallback, r.GetCurrentTerm())
 		case res := <-electionResults:
 			if res {
 				return r.doLeader
-			} else {
-				// start new election
 			}
 		case fall := <-fallback:
 			if fall {
@@ -65,7 +70,6 @@ func (r *Node) doCandidate() stateFunction {
 // channel on which the result of the vote should be sent over: true for a
 // successful election, false otherwise.
 func (r *Node) requestVotes(electionResults chan bool, fallback chan bool, currTerm uint64) {
-	votes := 1
 	peersLen := len(r.Peers)
 	majority := r.config.ClusterSize/2 + 1
 
@@ -74,34 +78,43 @@ func (r *Node) requestVotes(electionResults chan bool, fallback chan bool, currT
 	for _, peer := range r.Peers {
 		go func() {
 			reply, err := peer.RequestVoteRPC(r, &RequestVoteRequest{
-				Term:         r.GetCurrentTerm(),
+				Term:         currTerm,
 				Candidate:    r.Self,
 				LastLogIndex: r.LastLogIndex(),
 				LastLogTerm:  r.LastLogTerm(),
 			})
 
-			if err {
+			if err != nil {
 				r.Out("RequestVoteRPC to %v failed with %v", peer.Id, err)
+				votesChan <- false
 				return
 			}
 
-			if reply.Term > r.GetCurrentTerm() {
-
+			if reply.Term > currTerm {
+				// we're out of date, fallback!
+				r.setCurrentTerm(reply.Term)
+				r.setVotedFor("")
+				fallback <- true
 			}
-			votesChan <- reply.VoteGranted()
-		}()
 
+			votesChan <- reply.VoteGranted
+		}()
 	}
 
-	votesCount := 1
-	// TODO: Continue this
-	for i := 0; i < peersLen; i += 1 {
+	votesCount := 0
+
+	for i := 0; i < peersLen; i++ {
 		res := <-votesChan
 		if res {
-			votesCount += 1
+			votesCount++
+			if votesCount >= majority {
+				electionResults <- true
+				return
+			}
 		}
 	}
 
+	electionResults <- (votesCount >= majority)
 	return
 }
 
@@ -109,6 +122,28 @@ func (r *Node) requestVotes(electionResults chan bool, fallback chan bool, currT
 // node is in the candidate or leader state. It returns true if the caller
 // should fall back to the follower state, false otherwise.
 func (r *Node) handleCompetingRequestVote(msg RequestVoteMsg) (fallback bool) {
-	// TODO: Students should implement this method
-	return true
+
+	if msg.request.Term > r.GetCurrentTerm() {
+		r.setCurrentTerm(msg.request.Term)
+		msg.reply <- RequestVoteReply{
+			Term:        r.GetCurrentTerm(),
+			VoteGranted: true,
+		}
+		r.setVotedFor(msg.request.Candidate.Id)
+
+		return true
+	} else if msg.request.Term == r.GetCurrentTerm() {
+		msg.reply <- RequestVoteReply{
+			Term:        r.GetCurrentTerm(),
+			VoteGranted: (r.GetVotedFor() == msg.request.Candidate.Id),
+		}
+
+		return (msg.request.LastLogIndex > r.LastLogIndex())
+	}
+
+	msg.reply <- RequestVoteReply{
+		Term:        r.GetCurrentTerm(),
+		VoteGranted: false,
+	}
+	return false
 }
