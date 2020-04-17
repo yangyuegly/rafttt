@@ -7,11 +7,8 @@ func (r *Node) doLeader() stateFunction {
 	r.Out("Transitioning to LeaderState")
 	r.State = LeaderState
 	r.Leader = r.Self
-	fallback, _ := r.sendHeartbeats()
-	if fallback {
-		return r.doFollower
-	}
 
+	r.leaderMutex.Lock()
 	r.commitIndex = 0
 	r.lastApplied = 0
 	initNext := r.LastLogIndex() + 1
@@ -20,6 +17,25 @@ func (r *Node) doLeader() stateFunction {
 		r.matchIndex[p.Id] = 0
 	}
 	r.matchIndex[r.Self.Id] = r.LastLogIndex()
+
+	r.Out("Commiting the NOOP entry")
+	r.StoreLog(&LogEntry{
+		Index:   r.LastLogIndex() + 1,
+		TermId:  r.GetCurrentTerm(),
+		Type:    CommandType_NOOP,
+		Command: 0,
+		Data:    nil,
+		CacheId: "",
+	})
+	r.leaderMutex.Unlock()
+	fallback, sentToMajority := r.sendHeartbeats()
+	if fallback {
+		return r.doFollower
+	}
+
+	if !sentToMajority {
+		r.Out("Warning: cannot talk to the majority of nodes")
+	}
 
 	ticker := time.NewTicker(r.config.HeartbeatTimeout / 2)
 	defer ticker.Stop()
@@ -67,11 +83,32 @@ func (r *Node) doLeader() stateFunction {
 				}
 			}
 		case cliReq := <-r.clientRequest:
-			// TODO: MUTEXS!!
-			// requestsMutex     sync.Mutex
-
 			cacheID := createCacheID(cliReq.request.ClientId, cliReq.request.SequenceNum)
-			// TODO: make sure to not duplicate request!
+
+			r.requestsMutex.Lock()
+			oldReply, isDuplicate := r.GetCachedReply(*cliReq.request)
+			if isDuplicate {
+				// come after state machine runs
+				cliReq.reply <- *oldReply
+			} else if r.requestsByCacheID[cacheID] == nil {
+				// the first request
+				r.leaderMutex.Lock()
+				r.requestsByCacheID[cacheID] = cliReq.reply
+
+			} else {
+				// not the first request, but before the log precessed
+				ch := make(chan ClientReply)
+				r.requestsByCacheID[cacheID] = ch
+				reply1 := r.requestsByCacheID[cacheID]
+				reply2 := cliReq.reply
+				go func() {
+					msg := <-ch
+					reply1 <- msg
+					reply2 <- msg
+				}()
+			}
+			r.requestsMutex.Unlock()
+
 			en := &LogEntry{
 				Index:   r.LastLogIndex() + 1,
 				TermId:  r.GetCurrentTerm(),
@@ -82,11 +119,18 @@ func (r *Node) doLeader() stateFunction {
 			}
 
 			r.StoreLog(en)
-			r.requestsByCacheID[cacheID] = cliReq.reply
 
-			r.sendHeartbeats()
+			fallback, _ := r.sendHeartbeats()
 
-			r.processLogEntry(entry)
+			if fallback {
+				cliReq.reply <- ClientReply{
+					Status:     ClientStatus_NOT_LEADER,
+					Response:   nil,
+					LeaderHint: r.Leader,
+				}
+
+				return r.doFollower
+			}
 		case <-ticker.C:
 			fallback, _ := r.sendHeartbeats()
 			if fallback {
@@ -107,30 +151,50 @@ func (r *Node) doLeader() stateFunction {
 // up to that index. Once committed to that index, the replicated state
 // machine should be given the new log entries via processLogEntry.
 func (r *Node) sendHeartbeats() (fallback, sentToMajority bool) {
+	r.leaderMutex.Lock()
 	r.nextIndex[r.Self.Id] = r.LastLogIndex() + 1
 	r.matchIndex[r.Self.Id] = r.LastLogIndex()
+	r.leaderMutex.Unlock()
+
+	peersLen := len(r.Peers)
+	doneCh := make(chan bool, peersLen)
+	fallbackCh := make(chan bool, 1)
 
 	for _, p := range r.Peers {
 		if p != r.Self {
 			go func() {
-				// TODO: check for terminating condition
+				success := false
+				defer func() {
+					doneCh <- success
+				}()
 
 				for {
 					// sent out everything from nextIndex -> lastLogIndex
+					r.leaderMutex.Lock()
 					nxtInd := r.nextIndex[p.Id]
+					if nxtInd <= 0 {
+						panic("Assertion nxtInd > 0 failed")
+					}
+
 					lastInd := r.LastLogIndex()
 					var ensToSend []*LogEntry
 					for i := nxtInd; i <= lastInd; i++ {
-						// TODO: what if getlog nil?
 						ensToSend = append(ensToSend, r.GetLog(i))
 					}
+
+					var prevLogTerm uint64
+					if r.GetLog(nxtInd-1) != nil {
+						prevLogTerm = r.GetLog(nxtInd - 1).TermId
+					} else {
+						prevLogTerm = 0
+					}
+					r.leaderMutex.Unlock()
 
 					reply, err := p.AppendEntriesRPC(r, &AppendEntriesRequest{
 						Term:         r.GetCurrentTerm(),
 						Leader:       r.Self,
 						PrevLogIndex: nxtInd - 1,
-						// TODO: what if getlog nil?
-						PrevLogTerm:  r.GetLog(nxtInd - 1).TermId,
+						PrevLogTerm:  prevLogTerm,
 						Entries:      ensToSend,
 						LeaderCommit: r.commitIndex,
 					})
@@ -140,20 +204,29 @@ func (r *Node) sendHeartbeats() (fallback, sentToMajority bool) {
 						return
 					}
 
+					success = reply.Success
 					if reply.Term > r.GetCurrentTerm() {
 						r.setCurrentTerm(reply.Term)
 						r.setVotedFor("")
-						// fallback!!
-						// TODO: fix this
-						fallback = true
+						fallbackCh <- true
+						return
 					}
 
 					if reply.Success {
+						r.leaderMutex.Lock()
 						r.nextIndex[p.Id] = lastInd + 1
 						r.matchIndex[p.Id] = lastInd
-						break
+						r.checkForCommit()
+						r.leaderMutex.Unlock()
+						return
+					} else if nxtInd <= 1 {
+						// can't go back anymore!!
+						r.Error("AppendEntriesRPC to %v failed consistency check at 0", p.Id)
+						return
 					} else {
+						r.leaderMutex.Lock()
 						r.nextIndex[p.Id] = nxtInd - 1
+						r.leaderMutex.Unlock()
 					}
 
 				}
@@ -161,22 +234,56 @@ func (r *Node) sendHeartbeats() (fallback, sentToMajority bool) {
 		}
 	}
 
-	var N uint64
-	quorum := r.config.ClusterSize/2 + 1
-	for i := r.commitIndex + 1; i < len(r.Entries); i++ {
-		count := 0
-		for _, item := range r.matchIndex {
-			if count >= quorum {
-				N = i
-				break
+	majority := r.config.ClusterSize/2 + 1
+	successCnt := 0
+	for i := 0; i < peersLen; i++ {
+		select {
+		case success := <-doneCh:
+			if success {
+				successCnt += 1
+				if successCnt >= majority {
+					return false, true
+				}
 			}
-			if item >= i {
-				N++
+		case fall := <-fallbackCh:
+			if fall {
+				return true, false
 			}
 		}
 	}
 
-	return true, true
+	return false, false
+}
+
+// should be called with leader mutex locked
+func (r *Node) checkForCommit() {
+	majority := r.config.ClusterSize/2 + 1
+
+	newCommit := r.commitIndex
+	for i := r.commitIndex + 1; i <= r.LastLogIndex(); i++ {
+		cnt := 0
+		for _, ind := range r.matchIndex {
+			if ind >= i {
+				cnt += 1
+			}
+
+			if cnt >= majority {
+				newCommit = i
+				break
+			}
+		}
+
+		if newCommit != i {
+			break
+		}
+	}
+
+	if newCommit > r.commitIndex && r.GetLog(newCommit).TermId == r.GetCurrentTerm() {
+		for i := r.commitIndex + 1; i <= newCommit; i++ {
+			r.processLogEntry(*r.GetLog(i))
+		}
+		r.commitIndex = newCommit
+	}
 }
 
 // processLogEntry applies a single log entry to the finite state machine. It is
