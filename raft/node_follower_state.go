@@ -19,6 +19,7 @@ func (r *Node) doFollower() stateFunction {
 				timeout = randomTimeout(r.config.HeartbeatTimeout)
 			}
 		case reqVote := <-r.requestVote:
+			r.Out("Receiving Request Vote: %v", reqVote.request)
 			currTerm := r.GetCurrentTerm()
 			if reqVote.request.Term < currTerm {
 				reqVote.reply <- RequestVoteReply{
@@ -85,6 +86,7 @@ func (r *Node) isUpToDate(lastLogTerm uint64, lastLogIndex uint64) bool {
 // - resetTimeout is true if the follower node should reset the election timeout
 // - fallback is true if the node should become a follower again
 func (r *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback bool) {
+	//r.Out("Receiving Append Entries: %v", msg.request)
 	req := msg.request
 	fallback = false
 

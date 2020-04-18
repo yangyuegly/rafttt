@@ -57,6 +57,7 @@ func (r *Node) doLeader() stateFunction {
 				return r.doFollower
 			}
 		case regCli := <-r.registerClient:
+			r.Out("Registering Client")
 			en := &LogEntry{
 				Index:   r.LastLogIndex() + 1,
 				TermId:  r.GetCurrentTerm(),
@@ -83,6 +84,7 @@ func (r *Node) doLeader() stateFunction {
 				}
 			}
 		case cliReq := <-r.clientRequest:
+			r.Out("Received Client Request %v", cliReq.request)
 			cacheID := createCacheID(cliReq.request.ClientId, cliReq.request.SequenceNum)
 
 			r.requestsMutex.Lock()
@@ -92,9 +94,7 @@ func (r *Node) doLeader() stateFunction {
 				cliReq.reply <- *oldReply
 			} else if r.requestsByCacheID[cacheID] == nil {
 				// the first request
-				r.leaderMutex.Lock()
 				r.requestsByCacheID[cacheID] = cliReq.reply
-
 			} else {
 				// not the first request, but before the log precessed
 				ch := make(chan ClientReply)
@@ -132,14 +132,13 @@ func (r *Node) doLeader() stateFunction {
 				return r.doFollower
 			}
 		case <-ticker.C:
+			//r.Out("Sending heartbeat")
 			fallback, _ := r.sendHeartbeats()
 			if fallback {
 				return r.doFollower
 			}
 		}
 	}
-
-	return nil
 }
 
 // sendHeartbeats is used by the leader to send out heartbeats to each of
@@ -160,8 +159,9 @@ func (r *Node) sendHeartbeats() (fallback, sentToMajority bool) {
 	doneCh := make(chan bool, peersLen)
 	fallbackCh := make(chan bool, 1)
 
-	for _, p := range r.Peers {
-		if p != r.Self {
+	for _, item := range r.Peers {
+		if item.Id != r.Self.Id {
+			p := item
 			go func() {
 				success := false
 				defer func() {
@@ -190,14 +190,15 @@ func (r *Node) sendHeartbeats() (fallback, sentToMajority bool) {
 					}
 					r.leaderMutex.Unlock()
 
-					reply, err := p.AppendEntriesRPC(r, &AppendEntriesRequest{
+					req := &AppendEntriesRequest{
 						Term:         r.GetCurrentTerm(),
 						Leader:       r.Self,
 						PrevLogIndex: nxtInd - 1,
 						PrevLogTerm:  prevLogTerm,
 						Entries:      ensToSend,
 						LeaderCommit: r.commitIndex,
-					})
+					}
+					reply, err := p.AppendEntriesRPC(r, req)
 
 					if err != nil {
 						r.Out("AppendEntriesRPC to %v failed with %v", p.Id, err)
@@ -206,6 +207,7 @@ func (r *Node) sendHeartbeats() (fallback, sentToMajority bool) {
 
 					success = reply.Success
 					if reply.Term > r.GetCurrentTerm() {
+						r.Out("falling back due to %v, from request %v", reply, req)
 						r.setCurrentTerm(reply.Term)
 						r.setVotedFor("")
 						fallbackCh <- true
@@ -235,8 +237,8 @@ func (r *Node) sendHeartbeats() (fallback, sentToMajority bool) {
 	}
 
 	majority := r.config.ClusterSize/2 + 1
-	successCnt := 0
-	for i := 0; i < peersLen; i++ {
+	successCnt := 1
+	for i := 1; i < peersLen; i++ {
 		select {
 		case success := <-doneCh:
 			if success {

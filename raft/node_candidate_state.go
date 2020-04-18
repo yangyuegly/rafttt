@@ -62,8 +62,6 @@ func (r *Node) doCandidate() stateFunction {
 			}
 		}
 	}
-
-	return nil
 }
 
 // requestVotes is called to request votes from all other nodes. It takes in a
@@ -75,7 +73,8 @@ func (r *Node) requestVotes(electionResults chan bool, fallback chan bool, currT
 
 	votesChan := make(chan bool, peersLen)
 
-	for _, peer := range r.Peers {
+	for _, item := range r.Peers {
+		peer := item
 		go func() {
 			reply, err := peer.RequestVoteRPC(r, &RequestVoteRequest{
 				Term:         currTerm,
