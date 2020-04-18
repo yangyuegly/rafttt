@@ -37,7 +37,7 @@ func (r *Node) doLeader() stateFunction {
 		r.Out("Warning: cannot talk to the majority of nodes")
 	}
 
-	ticker := time.NewTicker(r.config.HeartbeatTimeout / 2)
+	ticker := time.NewTicker(r.config.HeartbeatTimeout / 4)
 	defer ticker.Stop()
 
 	for {
@@ -157,7 +157,7 @@ func (r *Node) sendHeartbeats() (fallback, sentToMajority bool) {
 
 	peersLen := len(r.Peers)
 	doneCh := make(chan bool, peersLen)
-	fallbackCh := make(chan bool, 1)
+	fallbackCh := make(chan bool, peersLen)
 
 	for _, item := range r.Peers {
 		if item.Id != r.Self.Id {
@@ -201,7 +201,9 @@ func (r *Node) sendHeartbeats() (fallback, sentToMajority bool) {
 					reply, err := p.AppendEntriesRPC(r, req)
 
 					if err != nil {
-						r.Out("AppendEntriesRPC to %v failed with %v", p.Id, err)
+						if err.Error() != "the network policy has forbid this communication" {
+							r.Out("AppendEntriesRPC to %v failed with %v", p.Id, err)
+						}
 						return
 					}
 

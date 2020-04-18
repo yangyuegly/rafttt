@@ -16,6 +16,7 @@ func (r *Node) doFollower() stateFunction {
 		case appEn := <-r.appendEntries:
 			resetTimeout, _ := r.handleAppendEntries(appEn)
 			if resetTimeout {
+				//r.Out("Resetting Timeout")
 				timeout = randomTimeout(r.config.HeartbeatTimeout)
 			}
 		case reqVote := <-r.requestVote:
@@ -65,6 +66,7 @@ func (r *Node) doFollower() stateFunction {
 			}
 		case <-timeout:
 			// timeout from leader occur, become a candidate
+			r.Out("Heartbeat Timeout, becoming candidate")
 			return r.doCandidate
 		}
 	}
