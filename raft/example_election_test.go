@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brown-csci1380-s20/raft-yyang149-kboonyap/hashmachine"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -93,32 +94,38 @@ func TestNewElection(t *testing.T) {
 
 func TestRequestVote_SentToLeader(t *testing.T) {
 
-	node1, err := CreateNode(0, nil, DefaultConfig()) //sender
+	node1, err := CreateNode(OpenPort(0), nil, DefaultConfig(), new(hashmachine.HashMachine), NewMemoryStore()) //sender
 	if err != nil {
 		t.Errorf("send to leader")
 	}
-	node2, err := CreateNode(0, nil, DefaultConfig()) //receiver
+	node2, err := CreateNode(OpenPort(0), nil, DefaultConfig(), new(hashmachine.HashMachine), NewMemoryStore()) //sender
 	if err != nil {
 		t.Errorf("send to leader")
 	}
 	//higher_term/higher_last_log_index/lower_last_log_term
 	node1.setCurrentTerm(2)
 	node2.setCurrentTerm(1)
-	node1.LastLogIndex = 4
-	node2.LastLogIndex = 3
+	node1.StoreLog(&LogEntry{
+		Index:  4,
+		TermId: 1,
+	})
 
-	node1.LastLogTerm = 1
-	node2.LastLogTerm = 2
-	assert.False(r.processVoteRequest(node1.generateVoteRequest()))
+	node2.StoreLog(&LogEntry{
+		Index:  3,
+		TermId: 2,
+	})
+
+	granted, _ := node2.processVoteRequest(node1.generateVoteRequest())
+	assert.False(t, granted)
 
 }
 
-func (r *RaftNode) generateVoteRequest() *RequestVoteRequest {
+func (r *Node) generateVoteRequest() *RequestVoteRequest {
 	return &RequestVoteRequest{
 		Term:         r.GetCurrentTerm(),
 		Candidate:    r.Self,
-		LastLogIndex: r.LastLogIndex,
-		LastLogTerm:  r.LastLogTerm,
+		LastLogIndex: r.LastLogIndex(),
+		LastLogTerm:  r.LastLogTerm(),
 	}
 }
 
