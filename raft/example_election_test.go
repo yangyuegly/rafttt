@@ -3,9 +3,6 @@ package raft
 import (
 	"testing"
 	"time"
-
-	"github.com/brown-csci1380-s20/raft-yyang149-kboonyap/hashmachine"
-	"github.com/stretchr/testify/assert"
 )
 
 // Tests that nodes can successfully join a cluster and elect a leader.
@@ -90,49 +87,4 @@ func TestNewElection(t *testing.T) {
 	if newLeader.GetCurrentTerm() == oldTerm {
 		t.Errorf("term did not change")
 	}
-}
-
-func TestRequestVote_SentToLeader(t *testing.T) {
-
-	node1, err := CreateNode(OpenPort(0), nil, DefaultConfig(), new(hashmachine.HashMachine), NewMemoryStore()) //sender
-	if err != nil {
-		t.Errorf("send to leader")
-	}
-	node2, err := CreateNode(OpenPort(0), nil, DefaultConfig(), new(hashmachine.HashMachine), NewMemoryStore()) //sender
-	if err != nil {
-		t.Errorf("send to leader")
-	}
-	//higher_term/higher_last_log_index/lower_last_log_term
-	node1.setCurrentTerm(2)
-	node2.setCurrentTerm(1)
-	node1.StoreLog(&LogEntry{
-		Index:  4,
-		TermId: 1,
-	})
-
-	node2.StoreLog(&LogEntry{
-		Index:  3,
-		TermId: 2,
-	})
-
-	granted, _ := node2.processVoteRequest(node1.generateVoteRequest())
-	assert.False(t, granted)
-
-}
-
-func (r *Node) generateVoteRequest() *RequestVoteRequest {
-	return &RequestVoteRequest{
-		Term:         r.GetCurrentTerm(),
-		Candidate:    r.Self,
-		LastLogIndex: r.LastLogIndex(),
-		LastLogTerm:  r.LastLogTerm(),
-	}
-}
-
-func TestRequestVote_SentToCandidate(t *testing.T) {
-
-}
-
-func TestRequestVote_SentToFollower(t *testing.T) {
-
 }

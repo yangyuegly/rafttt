@@ -92,32 +92,40 @@ func (r *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 	req := msg.request
 	fallback = false
 
-	// if the request term is later, we should fallback
-	if req.Term > r.GetCurrentTerm() {
-		r.setCurrentTerm(req.Term)
-		r.setVotedFor("")
-		fallback = true
-	} else if r.State == CandidateState && req.Term == r.GetCurrentTerm() {
-		fallback = true
-	} else if req.Term < r.GetCurrentTerm() {
+	//receiver implementation 1
+	if req.Term < r.GetCurrentTerm() {
 		// if we are later than the request, append entries unsuccessful
 		msg.reply <- AppendEntriesReply{
 			Term:    r.GetCurrentTerm(),
 			Success: false,
 		}
-		return false, fallback
+		return false, false
 	}
-
-	r.Leader = req.Leader
+	//receiver implementation 2
 	prevLog := r.GetLog(req.PrevLogIndex)
 	if prevLog == nil || prevLog.TermId != req.PrevLogTerm {
-		r.TruncateLog(req.PrevLogIndex)
+		//TODO:
+		// r.TruncateLog(req.PrevLogIndex) ?? piazza post 829
 		msg.reply <- AppendEntriesReply{
 			Term:    r.GetCurrentTerm(),
 			Success: false,
 		}
-		return true, fallback
+		return true, false //reset time out?
 	}
+	//implmentation 3-5
+
+	// if the request term is later, we should fallback
+	if req.Term > r.GetCurrentTerm() {
+		r.setCurrentTerm(req.Term)
+		r.setVotedFor("")
+		fallback = true
+		resetTimeout = true
+	} else if r.State == CandidateState && req.Term == r.GetCurrentTerm() {
+		fallback = true
+	}
+
+	r.Leader = req.Leader
+	//TODO: Mutex?
 	// check for conflict
 	for _, en := range req.Entries {
 		if r.GetLog(en.Index) != nil && r.GetLog(en.Index).TermId != en.TermId {

@@ -148,7 +148,7 @@ func (r *Node) handleCompetingRequestVote(msg RequestVoteMsg) (fallback bool) {
 			Term:        r.GetCurrentTerm(),
 			VoteGranted: (r.GetVotedFor() == msg.request.Candidate.Id),
 		}
-		return false
+		return false //do not fallback
 
 	}
 
