@@ -73,10 +73,8 @@ func (r *Node) processVoteRequest(req *RequestVoteRequest) (bool, uint64) {
 func (r *Node) isUpToDate(lastLogTerm uint64, lastLogIndex uint64) bool {
 	myLastLogTerm := r.LastLogTerm()
 
-	if lastLogTerm > myLastLogTerm {
-		r.Out("their last log term is greater")
-		return true
-	} else if lastLogTerm == myLastLogTerm {
+	if lastLogTerm >= myLastLogTerm {
+		r.Out("their last log term is greater or equal")
 		if lastLogIndex >= r.LastLogIndex() {
 			r.Out("last log term is equal, their last log index is at least ours")
 			return true

@@ -3,6 +3,8 @@ package raft
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // Tests that nodes can successfully join a cluster and elect a leader.
@@ -91,36 +93,33 @@ func TestNewElection(t *testing.T) {
 
 func TestRequestVote_SentToLeader(t *testing.T) {
 
-	node1, err := CreateNode(0, nil, DefaultConfig())//sender
-	if err!= nil {
+	node1, err := CreateNode(0, nil, DefaultConfig()) //sender
+	if err != nil {
 		t.Errorf("send to leader")
 	}
-	node2, err := CreateNode(0, nil, DefaultConfig())//receiver
-	if err!= nil {
+	node2, err := CreateNode(0, nil, DefaultConfig()) //receiver
+	if err != nil {
 		t.Errorf("send to leader")
 	}
 	//higher_term/higher_last_log_index/lower_last_log_term
 	node1.setCurrentTerm(2)
 	node2.setCurrentTerm(1)
-	node1.
+	node1.LastLogIndex = 4
+	node2.LastLogIndex = 3
 
-	node1.
+	node1.LastLogTerm = 1
+	node2.LastLogTerm = 2
+	assert.False(r.processVoteRequest(node1.generateVoteRequest()))
 
+}
 
-
-	cluster, err := CreateLocalCluster(config)
-
-	//wait for a leader to get elected
-	time.Sleep(time.Second * WaitPeriod)
-	leader, err := findLeader(cluster)
-
-	request := RequestVoteRequest{
-		Candidate:    leader.Self,
-		Term:         uint64(int64(leader.GetCurrentTerm()) + 1),
-		LastLogIndex: uint64(int64(leader.LastLogIndex()) + 1),
-		LastLogTerm:  uint64(int64(leader.LastLogTerm() + 1),
+func (r *RaftNode) generateVoteRequest() *RequestVoteRequest {
+	return &RequestVoteRequest{
+		Term:         r.GetCurrentTerm(),
+		Candidate:    r.Self,
+		LastLogIndex: r.LastLogIndex,
+		LastLogTerm:  r.LastLogTerm,
 	}
-
 }
 
 func TestRequestVote_SentToCandidate(t *testing.T) {
