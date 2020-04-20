@@ -53,12 +53,10 @@ func (r *Node) processVoteRequest(req *RequestVoteRequest) (bool, uint64) {
 		return false, currTerm
 	}
 
-	if req.Term > currTerm && (voted == "" || voted == req.Candidate.Id) {
-		r.Out("request term higher and has not voted: grant vote")
+	if req.Term > currTerm {
+		r.Out("request term higher and has not voted: update our term")
 		r.setCurrentTerm(req.Term)
-		r.setVotedFor("")
 		currTerm = req.Term
-		return true, currTerm
 	}
 
 	if r.isUpToDate(req.LastLogTerm, req.LastLogIndex) {
