@@ -124,20 +124,32 @@ func (r *Node) handleCompetingRequestVote(msg RequestVoteMsg) (fallback bool) {
 
 	if msg.request.Term > r.GetCurrentTerm() {
 		r.setCurrentTerm(msg.request.Term)
-		msg.reply <- RequestVoteReply{
-			Term:        r.GetCurrentTerm(),
-			VoteGranted: true,
+		r.setVotedFor("")
+		//equal last log index
+		if msg.request.LastLogIndex >= r.LastLogIndex() {
+			if msg.request.LastLogTerm >= r.LastLogTerm() {
+				//sender is at least as up-to-date, grant vote
+				msg.reply <- RequestVoteReply{
+					Term:        r.GetCurrentTerm(),
+					VoteGranted: true,
+				}
+				r.setVotedFor(msg.request.Candidate.Id)
+			}
+		} else {
+			msg.reply <- RequestVoteReply{
+				Term:        r.GetCurrentTerm(),
+				VoteGranted: false,
+			}
 		}
-		r.setVotedFor(msg.request.Candidate.Id)
-
+		//TODO: should we fall back in this case?
 		return true
 	} else if msg.request.Term == r.GetCurrentTerm() {
 		msg.reply <- RequestVoteReply{
 			Term:        r.GetCurrentTerm(),
 			VoteGranted: (r.GetVotedFor() == msg.request.Candidate.Id),
 		}
+		return false
 
-		return (msg.request.LastLogIndex > r.LastLogIndex())
 	}
 
 	msg.reply <- RequestVoteReply{
