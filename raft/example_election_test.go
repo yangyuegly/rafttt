@@ -88,3 +88,45 @@ func TestNewElection(t *testing.T) {
 		t.Errorf("term did not change")
 	}
 }
+
+func TestRequestVote_SentToLeader(t *testing.T) {
+
+	node1, err := CreateNode(0, nil, DefaultConfig())//sender
+	if err!= nil {
+		t.Errorf("send to leader")
+	}
+	node2, err := CreateNode(0, nil, DefaultConfig())//receiver
+	if err!= nil {
+		t.Errorf("send to leader")
+	}
+	//higher_term/higher_last_log_index/lower_last_log_term
+	node1.setCurrentTerm(2)
+	node2.setCurrentTerm(1)
+	node1.
+
+	node1.
+
+
+
+	cluster, err := CreateLocalCluster(config)
+
+	//wait for a leader to get elected
+	time.Sleep(time.Second * WaitPeriod)
+	leader, err := findLeader(cluster)
+
+	request := RequestVoteRequest{
+		Candidate:    leader.Self,
+		Term:         uint64(int64(leader.GetCurrentTerm()) + 1),
+		LastLogIndex: uint64(int64(leader.LastLogIndex()) + 1),
+		LastLogTerm:  uint64(int64(leader.LastLogTerm() + 1),
+	}
+
+}
+
+func TestRequestVote_SentToCandidate(t *testing.T) {
+
+}
+
+func TestRequestVote_SentToFollower(t *testing.T) {
+
+}

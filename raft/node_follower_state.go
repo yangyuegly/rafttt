@@ -20,37 +20,10 @@ func (r *Node) doFollower() stateFunction {
 				timeout = randomTimeout(r.config.HeartbeatTimeout)
 			}
 		case reqVote := <-r.requestVote:
-			r.Out("Receiving Request Vote: %v", reqVote.request)
-			currTerm := r.GetCurrentTerm()
-			if reqVote.request.Term < currTerm {
-				reqVote.reply <- RequestVoteReply{
-					Term:        currTerm,
-					VoteGranted: false,
-				}
-				continue
-			}
-
-			if reqVote.request.Term > currTerm {
-				r.setCurrentTerm(reqVote.request.Term)
-				r.setVotedFor("")
-				currTerm = reqVote.request.Term
-			}
-
-			if r.isUpToDate(reqVote.request.LastLogTerm, reqVote.request.LastLogIndex) {
-				voted := r.GetVotedFor()
-				if voted == "" || voted == reqVote.request.Candidate.Id {
-					r.setVotedFor(reqVote.request.Candidate.Id)
-					reqVote.reply <- RequestVoteReply{
-						Term:        currTerm,
-						VoteGranted: true,
-					}
-					continue
-				}
-			}
-
+			voteGranted, currTerm := r.processVoteRequest(reqVote.request)
 			reqVote.reply <- RequestVoteReply{
 				Term:        currTerm,
-				VoteGranted: false,
+				VoteGranted: voteGranted,
 			}
 		case regCli := <-r.registerClient:
 			regCli.reply <- RegisterClientReply{
@@ -71,14 +44,45 @@ func (r *Node) doFollower() stateFunction {
 		}
 	}
 }
+func (r *Node) processVoteRequest(req *RequestVoteRequest) (bool, uint64) {
+	voted := r.GetVotedFor()
+	r.Out("Receiving Request Vote: %v", req)
+	currTerm := r.GetCurrentTerm()
+	if req.Term < r.GetCurrentTerm() {
+		r.Out("request term lower: reject vote")
+		return false, currTerm
+	}
+
+	if req.Term > currTerm && (voted == "" || voted == req.Candidate.Id) {
+		r.Out("request term higher and has not voted: grant vote")
+		r.setCurrentTerm(req.Term)
+		r.setVotedFor("")
+		currTerm = req.Term
+		return true, currTerm
+	}
+
+	if r.isUpToDate(req.LastLogTerm, req.LastLogIndex) {
+		r.Out("request term up-to-date and has not voted: grant vote")
+		if voted == "" || voted == req.Candidate.Id {
+			r.setVotedFor(req.Candidate.Id)
+			return true, currTerm
+		}
+	}
+	return false, r.GetCurrentTerm()
+}
 
 // return true if the log in the argument is at least up-to-date as our log
 func (r *Node) isUpToDate(lastLogTerm uint64, lastLogIndex uint64) bool {
 	myLastLogTerm := r.LastLogTerm()
+
 	if lastLogTerm > myLastLogTerm {
+		r.Out("their last log term is greater")
 		return true
-	} else if lastLogTerm == myLastLogTerm && lastLogIndex >= r.LastLogIndex() {
-		return true
+	} else if lastLogTerm == myLastLogTerm {
+		if lastLogIndex >= r.LastLogIndex() {
+			r.Out("last log term is equal, their last log index is at least ours")
+			return true
+		}
 	}
 	return false
 }
