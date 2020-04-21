@@ -8,16 +8,36 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRequestVote_SentToLeader(t *testing.T) {
+func TestRequestVote(t *testing.T) {
 
+	node1, node2 := createNodeHelper(t)
+
+	node2.StoreLog(&LogEntry{
+		Index:  3,
+		TermId: 2,
+	})
+
+	granted, _ := node2.processVoteRequest(node1.generateVoteRequest())
+	assert.False(t, granted)
+
+}
+
+func createNodeHelper(t *testing.T) (node1 *Node, node2 *Node) {
 	node1, err := CreateNode(OpenPort(0), nil, DefaultConfig(), new(hashmachine.HashMachine), NewMemoryStore()) //sender
 	if err != nil {
 		t.Errorf("send to leader")
 	}
-	node2, err := CreateNode(OpenPort(0), nil, DefaultConfig(), new(hashmachine.HashMachine), NewMemoryStore()) //sender
+	node2, err = CreateNode(OpenPort(0), nil, DefaultConfig(), new(hashmachine.HashMachine), NewMemoryStore()) //sender
 	if err != nil {
 		t.Errorf("send to leader")
 	}
+	return node1, node2
+}
+
+func TestRequestVote_Case1(t *testing.T) {
+
+	node1, node2 := createNodeHelper(t)
+
 	//higher_term/higher_last_log_index/lower_last_log_term
 	node1.setCurrentTerm(2)
 	node2.setCurrentTerm(1)
@@ -33,6 +53,52 @@ func TestRequestVote_SentToLeader(t *testing.T) {
 
 	granted, _ := node2.processVoteRequest(node1.generateVoteRequest())
 	assert.False(t, granted)
+
+}
+func TestRequestVote_Case2(t *testing.T) {
+
+	node1, node2 := createNodeHelper(t)
+
+	//higher_term/lower_last_log_index/higher_last_log_term
+	node1.setCurrentTerm(2)
+	node2.setCurrentTerm(1)
+	node1.StoreLog(&LogEntry{
+		Index:  2,
+		TermId: 12,
+	})
+
+	node2.StoreLog(&LogEntry{
+		Index:  4,
+		TermId: 1,
+	})
+
+	granted, _ := node2.processVoteRequest(node1.generateVoteRequest())
+	assert.False(t, granted)
+
+}
+
+func TestHandleCompetingVotes(t *testing.T) {
+
+	node1, node2 := createNodeHelper(t)
+
+	//equal_term/lower_last_log_index/higher_last_log_term
+	node1.setCurrentTerm(1)
+	node2.setCurrentTerm(1)
+	node1.StoreLog(&LogEntry{
+		Index:  1,
+		TermId: 1,
+	})
+
+	node2.StoreLog(&LogEntry{
+		Index:  1,
+		TermId: 1,
+	})
+	reply := make(chan RequestVoteReply)
+	msg := &RequestVoteMsg{node1.generateVoteRequest(), reply}
+
+	// node2.State = CandidateState
+	fallback := node2.handleCompetingRequestVote(*msg)
+	assert.False(t, fallback)
 
 }
 

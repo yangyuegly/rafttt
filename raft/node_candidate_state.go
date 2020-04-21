@@ -122,18 +122,23 @@ func (r *Node) requestVotes(electionResults chan bool, fallback chan bool, currT
 // should fall back to the follower state, false otherwise.
 func (r *Node) handleCompetingRequestVote(msg RequestVoteMsg) (fallback bool) {
 
+	//higher term, always fall back
 	if msg.request.Term > r.GetCurrentTerm() {
 		r.setCurrentTerm(msg.request.Term)
 		r.setVotedFor("")
-		//equal last log index
-		if msg.request.LastLogIndex >= r.LastLogIndex() {
-			if msg.request.LastLogTerm >= r.LastLogTerm() {
-				//sender is at least as up-to-date, grant vote
+
+		//greater last log term, grant vote, fallback
+		if msg.request.LastLogTerm > r.LastLogTerm() {
+			msg.reply <- RequestVoteReply{
+				Term:        r.GetCurrentTerm(),
+				VoteGranted: true,
+			}
+		} else if msg.request.LastLogTerm == r.LastLogTerm() { //equal last log term, compare index
+			if msg.request.LastLogIndex >= r.LastLogIndex() {
 				msg.reply <- RequestVoteReply{
 					Term:        r.GetCurrentTerm(),
 					VoteGranted: true,
 				}
-				r.setVotedFor(msg.request.Candidate.Id)
 			}
 		} else {
 			msg.reply <- RequestVoteReply{
@@ -141,17 +146,16 @@ func (r *Node) handleCompetingRequestVote(msg RequestVoteMsg) (fallback bool) {
 				VoteGranted: false,
 			}
 		}
-		//TODO: should we fall back in this case?
 		return true
-	} else if msg.request.Term == r.GetCurrentTerm() {
+	} else if msg.request.Term == r.GetCurrentTerm() { //equal term
 		msg.reply <- RequestVoteReply{
 			Term:        r.GetCurrentTerm(),
-			VoteGranted: (r.GetVotedFor() == msg.request.Candidate.Id),
+			VoteGranted: false,
 		}
+		r.Out("was able to reach here")
 		return false //do not fallback
-
 	}
-
+	//lower current term, do not fallback
 	msg.reply <- RequestVoteReply{
 		Term:        r.GetCurrentTerm(),
 		VoteGranted: false,
