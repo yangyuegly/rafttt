@@ -159,47 +159,6 @@ func TestAppendEntries(t *testing.T) {
 
 }
 
-// func TestInit_Follower(t *testing.T) {
-// 	suppressLoggers()
-// 	config := DefaultConfig()
-// 	config.ElectionTimeout = 100 * time.Second //create a large election timeout
-
-// 	cluster, err := CreateLocalCluster(config)
-// 	defer cleanupCluster(cluster)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	// wait for a leader to be elected
-// 	time.Sleep(time.Second * WaitPeriod)
-// 	followerNode:= CreateNode()
-
-// 	followers, candidates, leaders := 0, 0, 0
-// 	for i := 0; i < config.ClusterSize; i++ {
-// 		node := cluster[i]
-// 		switch node.State {
-// 		case FollowerState:
-// 			followers++
-// 		case CandidateState:
-// 			candidates++
-// 		case LeaderState:
-// 			leaders++
-// 		}
-// 	}
-
-// 	if followers != config.ClusterSize-1 {
-// 		t.Errorf("follower count mismatch, expected %v, got %v", config.ClusterSize-1, followers)
-// 	}
-
-// 	if candidates != 0 {
-// 		t.Errorf("candidate count mismatch, expected %v, got %v", 0, candidates)
-// 	}
-
-// 	if leaders != 1 {
-// 		t.Errorf("leader count mismatch, expected %v, got %v", 1, leaders)
-// 	}
-// }
-
 func TestInit_Follower(t *testing.T) {
 	suppressLoggers()
 	config := DefaultConfig()
@@ -228,4 +187,51 @@ func TestInit_Follower(t *testing.T) {
 		t.Errorf("leader did not change")
 	}
 
+}
+
+func Test_Correct_Leader_Elected(t *testing.T) {
+	suppressLoggers()
+
+	cluster, err := createTestCluster([]int{7001, 7002, 7003, 7004, 7005})
+	defer cleanupCluster(cluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster[0].setCurrentTerm(5)
+	cluster[1].setCurrentTerm(4)
+	cluster[4].setCurrentTerm(4)
+	logEntry := &LogEntry{
+		Index:  cluster[0].LastLogIndex() + 1,
+		TermId: cluster[0].GetCurrentTerm(),
+		Type:   CommandType_NOOP,
+		Data:   []byte{5, 6, 7, 8},
+	}
+	cluster[0].StoreLog(logEntry)
+
+	// wait for a leader to be elected
+	time.Sleep(time.Second * WaitPeriod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realLeader, err := findLeader(cluster)
+	realLeader.Out(realLeader.String())
+
+	if cluster[0].State != LeaderState && cluster[1].State != LeaderState && cluster[4].State != LeaderState {
+		t.Errorf("cluster state incorrect %v", cluster[0].State)
+	}
+
+	// add a new log entry to the new leader; SHOULD be replicated
+	cluster[0].leaderMutex.Lock()
+	logEntry = &LogEntry{
+		Index:  cluster[0].LastLogIndex() + 1,
+		TermId: cluster[0].GetCurrentTerm(),
+		Type:   CommandType_NOOP,
+		Data:   []byte{9, 2, 10, 12},
+	}
+	cluster[0].StoreLog(logEntry)
+	cluster[0].leaderMutex.Unlock()
+	time.Sleep(time.Second * WaitPeriod)
+	if !logsMatch(cluster[0], cluster) {
+		t.Errorf("logs incorrect")
+	}
 }

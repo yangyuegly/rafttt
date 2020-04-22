@@ -1,11 +1,12 @@
 package raft
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
 
-func Test_Multiple_Partition(t *testing.T) {
+func TestThreeWayPartition(t *testing.T) {
 	suppressLoggers()
 	cluster, err := createTestCluster([]int{8001, 8002, 8003, 8004, 8005, 8006, 8007})
 	defer cleanupCluster(cluster)
@@ -58,6 +59,75 @@ func Test_Multiple_Partition(t *testing.T) {
 		t.Error("There should be a no leader found error")
 	}
 }
+
+func Test_One_Follower_Partitioned(t *testing.T) {
+	suppressLoggers()
+
+	cluster, err := createTestCluster([]int{6001, 6002, 6003, 6004, 6005})
+	defer cleanupCluster(cluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for a leader to be elected
+	time.Sleep(time.Second * WaitPeriod)
+	leader, err := findLeader(cluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	followers := make([]*Node, 0)
+	for _, node := range cluster {
+		if node != leader {
+			followers = append(followers, node)
+		}
+	}
+
+	// partition into 2 clusters: one with one follower; another with the rest
+	ff := followers[0]
+	for _, follower := range followers[1:] {
+		follower.NetworkPolicy.RegisterPolicy(*follower.Self, *ff.Self, false)
+		ff.NetworkPolicy.RegisterPolicy(*ff.Self, *follower.Self, false)
+	}
+	leader.NetworkPolicy.RegisterPolicy(*leader.Self, *ff.Self, false)
+	leader.NetworkPolicy.RegisterPolicy(*ff.Self, *leader.Self, false)
+
+	//
+	time.Sleep(time.Second * WaitPeriod)
+	if ff.State == LeaderState {
+		t.Fatal(errors.New("ff should not be a leader when partitioned"))
+	}
+
+	// add a new log entry to the new leader; SHOULD be replicated
+	leader.leaderMutex.Lock()
+	logEntry := &LogEntry{
+		Index:  leader.LastLogIndex() + 1,
+		TermId: leader.GetCurrentTerm(),
+		Type:   CommandType_NOOP,
+		Data:   []byte{5, 6, 7, 8},
+	}
+	leader.StoreLog(logEntry)
+	leader.leaderMutex.Unlock()
+
+	time.Sleep(time.Second * WaitPeriod)
+
+	// rejoin the cluster
+	for _, follower := range followers[1:] {
+		follower.NetworkPolicy.RegisterPolicy(*follower.Self, *ff.Self, true)
+		ff.NetworkPolicy.RegisterPolicy(*ff.Self, *follower.Self, true)
+	}
+	leader.NetworkPolicy.RegisterPolicy(*leader.Self, *ff.Self, true)
+	leader.NetworkPolicy.RegisterPolicy(*ff.Self, *leader.Self, true)
+
+	// wait for larger cluster to stabilize
+	time.Sleep(time.Second * WaitPeriod)
+
+	if !logsMatch(ff, cluster) {
+		t.Errorf("logs incorrect")
+	}
+}
+
+
 
 // func TestClientRequest_Leader_Partition(t *testing.T) {
 // 	suppressLoggers()
