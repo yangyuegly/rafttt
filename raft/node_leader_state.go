@@ -5,6 +5,12 @@ import "time"
 // doLeader implements the logic for a Raft node in the leader state.
 func (r *Node) doLeader() stateFunction {
 	r.Out("Transitioning to LeaderState")
+
+	// sanity check
+	if r.GetVotedFor() != r.Self.Id {
+		panic("Leader should voted for itself")
+	}
+
 	r.State = LeaderState
 	r.Leader = r.Self
 
@@ -37,7 +43,7 @@ func (r *Node) doLeader() stateFunction {
 		r.Out("Warning: cannot talk to the majority of nodes")
 	}
 
-	ticker := time.NewTicker(r.config.HeartbeatTimeout / 4)
+	ticker := time.NewTicker(r.config.HeartbeatTimeout)
 	defer ticker.Stop()
 
 	for {
@@ -52,7 +58,13 @@ func (r *Node) doLeader() stateFunction {
 				return r.doFollower
 			}
 		case reqVote := <-r.requestVote:
-			fallback := r.handleCompetingRequestVote(reqVote)
+			fallback, voteGranted := r.handleCompetingRequestVote(reqVote)
+
+			reqVote.reply <- RequestVoteReply{
+				Term:        r.GetCurrentTerm(),
+				VoteGranted: voteGranted,
+			}
+
 			if fallback {
 				return r.doFollower
 			}
@@ -244,7 +256,7 @@ func (r *Node) sendHeartbeats() (fallback, sentToMajority bool) {
 		select {
 		case success := <-doneCh:
 			if success {
-				successCnt += 1
+				successCnt++
 				if successCnt >= majority {
 					return false, true
 				}
@@ -268,7 +280,7 @@ func (r *Node) checkForCommit() {
 		cnt := 0
 		for _, ind := range r.matchIndex {
 			if ind >= i {
-				cnt += 1
+				cnt++
 			}
 
 			if cnt >= majority {
