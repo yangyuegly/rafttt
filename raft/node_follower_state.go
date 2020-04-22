@@ -97,19 +97,20 @@ func (r *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 	fallback = false
 	resetTimeout = false
 
-	// if the request term is later, we should fallback
-	if req.Term > r.GetCurrentTerm() {
-		r.setCurrentTerm(req.Term)
-		r.setVotedFor("")
-		fallback = true
-		resetTimeout = true
-	} else if req.Term < r.GetCurrentTerm() {
+	if req.Term < r.GetCurrentTerm() {
 		// if we are later than the request, append entries unsuccessful
 		msg.reply <- AppendEntriesReply{
 			Term:    r.GetCurrentTerm(),
 			Success: false,
 		}
 		return false, false
+	}
+	// if the request term is later, we should fallback
+	if req.Term > r.GetCurrentTerm() {
+		r.setCurrentTerm(req.Term)
+		r.setVotedFor("")
+		fallback = true
+		resetTimeout = true
 	} else {
 		// req.Term == r.GetCurrentTerm()
 		if r.State == CandidateState {
@@ -123,12 +124,12 @@ func (r *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 	// receiver implementation 2
 	prevLog := r.GetLog(req.PrevLogIndex)
 	if prevLog == nil || prevLog.TermId != req.PrevLogTerm {
-		r.TruncateLog(req.PrevLogIndex)
+		// r.TruncateLog(req.PrevLogIndex)
 		msg.reply <- AppendEntriesReply{
 			Term:    r.GetCurrentTerm(),
 			Success: false,
 		}
-		return true, fallback
+		return true, true
 	}
 	// implmentation 3-5
 	// check for conflict
@@ -162,5 +163,5 @@ func (r *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 		Term:    r.GetCurrentTerm(),
 		Success: true,
 	}
-	return true, fallback
+	return true, true
 }
