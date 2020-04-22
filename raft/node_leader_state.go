@@ -165,6 +165,7 @@ func (r *Node) sendHeartbeats() (fallback, sentToMajority bool) {
 	r.leaderMutex.Lock()
 	r.nextIndex[r.Self.Id] = r.LastLogIndex() + 1
 	r.matchIndex[r.Self.Id] = r.LastLogIndex()
+	currTerm := r.GetCurrentTerm()
 	r.leaderMutex.Unlock()
 
 	peersLen := len(r.Peers)
@@ -203,7 +204,7 @@ func (r *Node) sendHeartbeats() (fallback, sentToMajority bool) {
 					r.leaderMutex.Unlock()
 
 					req := &AppendEntriesRequest{
-						Term:         r.GetCurrentTerm(),
+						Term:         currTerm,
 						Leader:       r.Self,
 						PrevLogIndex: nxtInd - 1,
 						PrevLogTerm:  prevLogTerm,
@@ -220,7 +221,7 @@ func (r *Node) sendHeartbeats() (fallback, sentToMajority bool) {
 					}
 
 					success = reply.Success
-					if reply.Term > r.GetCurrentTerm() {
+					if reply.Term > currTerm {
 						r.Out("falling back due to %v, from request %v", reply, req)
 						r.setCurrentTerm(reply.Term)
 						r.setVotedFor("")
