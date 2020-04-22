@@ -5,7 +5,7 @@ func (r *Node) doFollower() stateFunction {
 	r.Out("Transitioning to FollowerState")
 	r.State = FollowerState
 
-	timeout := randomTimeout(r.config.HeartbeatTimeout)
+	timeout := randomTimeout(r.config.ElectionTimeout)
 
 	for {
 		select {
@@ -17,10 +17,15 @@ func (r *Node) doFollower() stateFunction {
 			resetTimeout, _ := r.handleAppendEntries(appEn)
 			if resetTimeout {
 				//r.Out("Resetting Timeout")
-				timeout = randomTimeout(r.config.HeartbeatTimeout)
+				timeout = randomTimeout(r.config.ElectionTimeout)
 			}
 		case reqVote := <-r.requestVote:
 			voteGranted, currTerm := r.processVoteRequest(reqVote.request)
+
+			if voteGranted {
+				timeout = randomTimeout(r.config.ElectionTimeout)
+			}
+
 			reqVote.reply <- RequestVoteReply{
 				Term:        currTerm,
 				VoteGranted: voteGranted,
@@ -44,7 +49,7 @@ func (r *Node) doFollower() stateFunction {
 		}
 	}
 }
-func (r *Node) processVoteRequest(req *RequestVoteRequest) (bool, uint64) {
+func (r *Node) processVoteRequest(req *RequestVoteRequest) (voteGranted bool, term uint64) {
 	voted := r.GetVotedFor()
 	r.Out("Receiving Request Vote: %v", req)
 	currTerm := r.GetCurrentTerm()
@@ -71,15 +76,14 @@ func (r *Node) processVoteRequest(req *RequestVoteRequest) (bool, uint64) {
 
 // return true if the log in the argument is at least up-to-date as our log
 func (r *Node) isUpToDate(lastLogTerm uint64, lastLogIndex uint64) bool {
-	myLastLogTerm := r.LastLogTerm()
-
-	if lastLogTerm >= myLastLogTerm {
-		r.Out("their last log term is greater or equal")
+	if lastLogTerm > r.LastLogTerm() {
+		return true
+	} else if lastLogTerm == r.LastLogTerm() {
 		if lastLogIndex >= r.LastLogIndex() {
-			r.Out("last log term is equal, their last log index is at least ours")
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -91,28 +95,7 @@ func (r *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 	//r.Out("Receiving Append Entries: %v", msg.request)
 	req := msg.request
 	fallback = false
-
-	//receiver implementation 1
-	if req.Term < r.GetCurrentTerm() {
-		// if we are later than the request, append entries unsuccessful
-		msg.reply <- AppendEntriesReply{
-			Term:    r.GetCurrentTerm(),
-			Success: false,
-		}
-		return false, false
-	}
-	//receiver implementation 2
-	prevLog := r.GetLog(req.PrevLogIndex)
-	if prevLog == nil || prevLog.TermId != req.PrevLogTerm {
-		//TODO:
-		// r.TruncateLog(req.PrevLogIndex) ?? piazza post 829
-		msg.reply <- AppendEntriesReply{
-			Term:    r.GetCurrentTerm(),
-			Success: false,
-		}
-		return true, false //reset time out?
-	}
-	//implmentation 3-5
+	resetTimeout = false
 
 	// if the request term is later, we should fallback
 	if req.Term > r.GetCurrentTerm() {
@@ -120,12 +103,34 @@ func (r *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 		r.setVotedFor("")
 		fallback = true
 		resetTimeout = true
-	} else if r.State == CandidateState && req.Term == r.GetCurrentTerm() {
-		fallback = true
+	} else if req.Term < r.GetCurrentTerm() {
+		// if we are later than the request, append entries unsuccessful
+		msg.reply <- AppendEntriesReply{
+			Term:    r.GetCurrentTerm(),
+			Success: false,
+		}
+		return false, false
+	} else {
+		// req.Term == r.GetCurrentTerm()
+		if r.State == CandidateState {
+			fallback = true
+		} else if r.State == LeaderState {
+			panic("Two leaders found for the same term!")
+		}
 	}
 
 	r.Leader = req.Leader
-	//TODO: Mutex?
+	// receiver implementation 2
+	prevLog := r.GetLog(req.PrevLogIndex)
+	if prevLog == nil || prevLog.TermId != req.PrevLogTerm {
+		r.TruncateLog(req.PrevLogIndex)
+		msg.reply <- AppendEntriesReply{
+			Term:    r.GetCurrentTerm(),
+			Success: false,
+		}
+		return true, fallback
+	}
+	// implmentation 3-5
 	// check for conflict
 	for _, en := range req.Entries {
 		if r.GetLog(en.Index) != nil && r.GetLog(en.Index).TermId != en.TermId {
@@ -140,6 +145,7 @@ func (r *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 		if r.GetLog(en.Index) == nil {
 			r.StoreLog(en)
 		}
+
 		lastNewEntry = en.Index
 	}
 

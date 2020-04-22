@@ -59,7 +59,7 @@ func TestClientInteraction_Leader(t *testing.T) {
 // Example test making sure the follower would reject the registration and requests from clients with correct messages
 // The test on candidates can be similar with these sample tests
 func TestClientInteraction_Follower(t *testing.T) {
-	suppressLoggers()
+	//suppressLoggers()
 	config := DefaultConfig()
 	// set the ElectionTimeout long enough to keep nodes in the state of follower
 	config.ElectionTimeout = 60 * time.Second

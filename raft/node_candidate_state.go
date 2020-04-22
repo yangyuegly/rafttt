@@ -26,7 +26,12 @@ func (r *Node) doCandidate() stateFunction {
 				return r.doFollower
 			}
 		case reqVote := <-r.requestVote:
-			fallback := r.handleCompetingRequestVote(reqVote)
+			fallback, voteGranted := r.handleCompetingRequestVote(reqVote)
+
+			reqVote.reply <- RequestVoteReply{
+				Term:        r.GetCurrentTerm(),
+				VoteGranted: voteGranted,
+			}
 
 			if fallback {
 				return r.doFollower
@@ -120,45 +125,21 @@ func (r *Node) requestVotes(electionResults chan bool, fallback chan bool, currT
 // handleCompetingRequestVote handles an incoming vote request when the current
 // node is in the candidate or leader state. It returns true if the caller
 // should fall back to the follower state, false otherwise.
-func (r *Node) handleCompetingRequestVote(msg RequestVoteMsg) (fallback bool) {
-
-	//higher term, always fall back
+func (r *Node) handleCompetingRequestVote(msg RequestVoteMsg) (fallback bool, voteGranted bool) {
+	// higher term, always fall back
 	if msg.request.Term > r.GetCurrentTerm() {
 		r.setCurrentTerm(msg.request.Term)
-		r.setVotedFor("")
 
-		//greater last log term, grant vote, fallback
-		if msg.request.LastLogTerm > r.LastLogTerm() {
-			msg.reply <- RequestVoteReply{
-				Term:        r.GetCurrentTerm(),
-				VoteGranted: true,
-			}
-		} else if msg.request.LastLogTerm == r.LastLogTerm() { //equal last log term, compare index
-			if msg.request.LastLogIndex >= r.LastLogIndex() {
-				msg.reply <- RequestVoteReply{
-					Term:        r.GetCurrentTerm(),
-					VoteGranted: true,
-				}
-			}
-		} else {
-			msg.reply <- RequestVoteReply{
-				Term:        r.GetCurrentTerm(),
-				VoteGranted: false,
-			}
+		if r.isUpToDate(msg.request.LastLogTerm, msg.request.LastLogIndex) {
+			r.setVotedFor(msg.request.Candidate.Id)
+			return true, true
 		}
-		return true
+
+		r.setVotedFor("")
+		return true, false
 	} else if msg.request.Term == r.GetCurrentTerm() { //equal term
-		msg.reply <- RequestVoteReply{
-			Term:        r.GetCurrentTerm(),
-			VoteGranted: false,
-		}
-		r.Out("was able to reach here")
-		return false //do not fallback
+		return false, r.GetVotedFor() == msg.request.Candidate.Id
 	}
-	//lower current term, do not fallback
-	msg.reply <- RequestVoteReply{
-		Term:        r.GetCurrentTerm(),
-		VoteGranted: false,
-	}
-	return false
+
+	return false, false
 }
