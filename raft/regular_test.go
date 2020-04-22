@@ -61,7 +61,6 @@ func TestRequestVote_Case1(t *testing.T) {
 func TestRequestVote_Case2(t *testing.T) {
 	node1, node2 := createNodeHelper(t)
 
-	//higher_term/lower_last_log_index/higher_last_log_term
 	node1.setCurrentTerm(2)
 	node2.setCurrentTerm(1)
 	node1.StoreLog(&LogEntry{
@@ -164,6 +163,188 @@ func TestAppendEntries(t *testing.T) {
 	assert.False(t, reset)
 	appReply := <-appMsg.reply
 	assert.False(t, appReply.Success)
+
+}
+
+func TestAppendEntries_Case2(t *testing.T) {
+	//equal_term_is_accepted_with_one_entry
+	node1, err := CreateNode(OpenPort(0), nil, DefaultConfig(), new(hashmachine.HashMachine), NewMemoryStore()) //sender
+	if err != nil {
+		t.Errorf("send to leader")
+	}
+	node2, err := CreateNode(OpenPort(0), nil, DefaultConfig(), new(hashmachine.HashMachine), NewMemoryStore()) //sender
+	if err != nil {
+		t.Errorf("send to leader")
+	}
+
+	node1.setCurrentTerm(1)
+	node2.setCurrentTerm(1)
+	node1.StoreLog(&LogEntry{
+		Index:  2,
+		TermId: 1,
+	})
+
+	node2.StoreLog(&LogEntry{
+		Index:  3,
+		TermId: 2,
+	})
+
+	entriesToAppend := make([]*LogEntry, 1)
+	entriesToAppend[0] = &LogEntry{
+		Index:  4,
+		TermId: 2,
+	}
+	node2.commitIndex = 4
+
+	enRequest := &AppendEntriesRequest{
+		Term:         node2.GetCurrentTerm(),
+		Leader:       node2.Self,
+		PrevLogIndex: 2,
+		PrevLogTerm:  1, //correct prevlog, should grant
+		Entries:      entriesToAppend,
+		LeaderCommit: 4,
+	}
+	appMsg := &AppendEntriesMsg{
+		request: enRequest,
+		reply:   make(chan AppendEntriesReply, 1),
+	}
+
+	reset, fallback := node1.handleAppendEntries(*appMsg)
+	assert.True(t, reset)
+	assert.True(t, fallback)
+
+	appReply := <-appMsg.reply
+	assert.True(t, appReply.Success)
+
+}
+
+func TestAppendEntries_Case3(t *testing.T) {
+	//equal_term_is_accepted_with_higher_commit_index
+	node1, err := CreateNode(OpenPort(0), nil, DefaultConfig(), new(hashmachine.HashMachine), NewMemoryStore()) //sender
+	if err != nil {
+		t.Errorf("send to leader")
+	}
+	node2, err := CreateNode(OpenPort(0), nil, DefaultConfig(), new(hashmachine.HashMachine), NewMemoryStore()) //sender
+	if err != nil {
+		t.Errorf("send to leader")
+	}
+
+	node1.setCurrentTerm(1)
+	node2.setCurrentTerm(1)
+	node1.StoreLog(&LogEntry{
+		Index:  2,
+		TermId: 1,
+	})
+
+	node2.StoreLog(&LogEntry{
+		Index:  3,
+		TermId: 2,
+	})
+
+	entriesToAppend := make([]*LogEntry, 1)
+	entriesToAppend[0] = &LogEntry{
+		Index:  3,
+		TermId: 2,
+	}
+	node2.commitIndex = 4
+
+	enRequest := &AppendEntriesRequest{
+		Term:         node2.GetCurrentTerm(),
+		Leader:       node2.Self,
+		PrevLogIndex: 2,
+		PrevLogTerm:  1, //correct prevlog, should grant
+		Entries:      entriesToAppend,
+		LeaderCommit: 4,
+	}
+	appMsg := &AppendEntriesMsg{
+		request: enRequest,
+		reply:   make(chan AppendEntriesReply, 1),
+	}
+
+	reset, fallback := node1.handleAppendEntries(*appMsg)
+
+	assert.True(t, reset)
+	assert.True(t, fallback)
+	assert.Equal(t, uint64(3), node1.commitIndex)
+
+	appReply := <-appMsg.reply
+	assert.True(t, appReply.Success)
+
+}
+
+func TestAppendEntries_Case4(t *testing.T) {
+	//equal_term_is_accepted_with_higher_commit_index
+	node1, err := CreateNode(OpenPort(0), nil, DefaultConfig(), new(hashmachine.HashMachine), NewMemoryStore()) //sender
+	if err != nil {
+		t.Errorf("send to leader")
+	}
+	node2, err := CreateNode(OpenPort(0), nil, DefaultConfig(), new(hashmachine.HashMachine), NewMemoryStore()) //sender
+	if err != nil {
+		t.Errorf("send to leader")
+	}
+
+	node1.setCurrentTerm(1)
+	node2.setCurrentTerm(8)
+	node1.StoreLog(&LogEntry{
+		Index:  2,
+		TermId: 1,
+	})
+
+	node2.StoreLog(&LogEntry{
+		Index:  3,
+		TermId: 2,
+	})
+
+	entriesToAppend := make([]*LogEntry, 6)
+	entriesToAppend[0] = &LogEntry{
+		Index:  3,
+		TermId: 2,
+	}
+	entriesToAppend[1] = &LogEntry{
+		Index:  4,
+		TermId: 2,
+	}
+	entriesToAppend[2] = &LogEntry{
+		Index:  5,
+		TermId: 2,
+	}
+	entriesToAppend[3] = &LogEntry{
+		Index:  6,
+		TermId: 2,
+	}
+	entriesToAppend[4] = &LogEntry{
+		Index:  7,
+		TermId: 2,
+	}
+	entriesToAppend[5] = &LogEntry{
+		Index:  8,
+		TermId: 2,
+	}
+
+	node2.commitIndex = 4
+
+	enRequest := &AppendEntriesRequest{
+		Term:         node2.GetCurrentTerm(),
+		Leader:       node2.Self,
+		PrevLogIndex: 2,
+		PrevLogTerm:  1, //correct prevlog, should grant
+		Entries:      entriesToAppend,
+		LeaderCommit: 5,
+	}
+	appMsg := &AppendEntriesMsg{
+		request: enRequest,
+		reply:   make(chan AppendEntriesReply, 1),
+	}
+
+	reset, fallback := node1.handleAppendEntries(*appMsg)
+
+	assert.True(t, reset)
+	assert.True(t, fallback)
+	assert.True(t, logsMatch(node2, []*Node{node1}))
+	assert.Equal(t, uint64(5), node1.commitIndex)
+
+	appReply := <-appMsg.reply
+	assert.True(t, appReply.Success)
 
 }
 

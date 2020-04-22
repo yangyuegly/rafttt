@@ -4,6 +4,9 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/brown-csci1380-s20/raft-yyang149-kboonyap/hashmachine"
+	"golang.org/x/net/context"
 )
 
 func TestThreeWayPartition(t *testing.T) {
@@ -127,7 +130,91 @@ func Test_One_Follower_Partitioned(t *testing.T) {
 	}
 }
 
+func TestClientInteraction_Partition(t *testing.T) {
+	suppressLoggers()
+	config := DefaultConfig()
+	cluster, _ := CreateLocalCluster(config)
+	defer cleanupCluster(cluster)
 
+	time.Sleep(2 * time.Second)
+
+	leader, err := findLeader(cluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	followers := make([]*Node, 0)
+	for _, node := range cluster {
+		if node != leader {
+			followers = append(followers, node)
+		}
+	}
+
+	// partition into 2 clusters: one with one follower; another with the rest
+	ff := followers[0]
+	for _, follower := range followers[1:] {
+		follower.NetworkPolicy.RegisterPolicy(*follower.Self, *ff.Self, false)
+		ff.NetworkPolicy.RegisterPolicy(*ff.Self, *follower.Self, false)
+	}
+	leader.NetworkPolicy.RegisterPolicy(*leader.Self, *ff.Self, false)
+	leader.NetworkPolicy.RegisterPolicy(*ff.Self, *leader.Self, false)
+
+	//
+	time.Sleep(time.Second * WaitPeriod)
+	if ff.State == LeaderState {
+		t.Fatal(errors.New("ff should not be a leader when partitioned"))
+	}
+
+	// First make sure we can register a client correctly
+	reply, _ := leader.RegisterClientCaller(context.Background(), &RegisterClientRequest{})
+
+	if reply.Status != ClientStatus_OK {
+		t.Fatal("Counld not register client")
+	}
+
+	clientid := reply.ClientId
+
+	// Hash initialization request
+	initReq := ClientRequest{
+		ClientId:        clientid,
+		SequenceNum:     1,
+		StateMachineCmd: hashmachine.HashChainInit,
+		Data:            []byte("hello"),
+	}
+	clientResult, _ := leader.ClientRequestCaller(context.Background(), &initReq)
+	if reply.Status != ClientStatus_OK {
+		t.Fatal("Leader failed to commit a client request")
+	}
+
+	// Make sure further request is correct processed
+	req := ClientRequest{
+		ClientId:        1,
+		SequenceNum:     1,
+		StateMachineCmd: hashmachine.HashChainInit,
+		Data:            []byte("hello"),
+	}
+
+	clientResult, _ = cluster[0].ClientRequestCaller(context.Background(), &req)
+	if clientResult.Status != ClientStatus_REQ_FAILED && clientResult.Status != ClientStatus_ELECTION_IN_PROGRESS {
+		t.Fatal("Wrong response when sending a client request to a partitioned follower")
+	}
+
+	// rejoin the cluster
+	for _, follower := range followers[1:] {
+		follower.NetworkPolicy.RegisterPolicy(*follower.Self, *ff.Self, true)
+		ff.NetworkPolicy.RegisterPolicy(*ff.Self, *follower.Self, true)
+	}
+	leader.NetworkPolicy.RegisterPolicy(*leader.Self, *ff.Self, true)
+	leader.NetworkPolicy.RegisterPolicy(*ff.Self, *leader.Self, true)
+
+	// wait for larger cluster to stabilize
+	time.Sleep(time.Second * WaitPeriod)
+
+	if !logsMatch(ff, cluster) {
+		t.Errorf("logs incorrect")
+	}
+
+}
 
 // func TestClientRequest_Leader_Partition(t *testing.T) {
 // 	suppressLoggers()
