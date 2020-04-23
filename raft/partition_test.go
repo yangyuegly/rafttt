@@ -2,10 +2,14 @@ package raft
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/brown-csci1380-s20/raft-yyang149-kboonyap/hashmachine"
+	"github.com/stretchr/testify/assert"
 	"golang.org/x/net/context"
 )
 
@@ -112,6 +116,23 @@ func Test_One_Follower_Partitioned(t *testing.T) {
 	leader.StoreLog(logEntry)
 	leader.leaderMutex.Unlock()
 
+	reply, _ := ff.RegisterClientCaller(context.Background(), &RegisterClientRequest{})
+	if reply.Status == ClientStatus_OK {
+		t.Fatal("One follower should not register client")
+	}
+
+	// Hash initialization request
+	initReq := ClientRequest{
+		ClientId:        1,
+		SequenceNum:     1,
+		StateMachineCmd: hashmachine.HashChainInit,
+		Data:            []byte("hello"),
+	}
+	clientResult, _ := ff.ClientRequestCaller(context.Background(), &initReq)
+	if clientResult.Status == ClientStatus_OK {
+		t.Fatal("one follower should not commit a client request")
+	}
+
 	time.Sleep(time.Second * WaitPeriod)
 
 	// rejoin the cluster
@@ -128,12 +149,12 @@ func Test_One_Follower_Partitioned(t *testing.T) {
 	if !logsMatch(ff, cluster) {
 		t.Errorf("logs incorrect")
 	}
+
 }
 
 func TestClientInteraction_Partition(t *testing.T) {
 	suppressLoggers()
-	config := DefaultConfig()
-	cluster, _ := CreateLocalCluster(config)
+	cluster, err := createTestCluster([]int{6001, 6002, 6003, 6004, 6005})
 	defer cleanupCluster(cluster)
 
 	time.Sleep(2 * time.Second)
@@ -216,187 +237,75 @@ func TestClientInteraction_Partition(t *testing.T) {
 
 }
 
-// func TestClientRequest_Leader_Partition(t *testing.T) {
-// 	suppressLoggers()
-// 	cluster, err := createTestCluster([]int{6001, 6002, 6003, 6004, 6005})
-// 	defer cleanupCluster(cluster)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
+func TestShutDown(t *testing.T) {
+	suppressLoggers()
+	config := DefaultConfig()
+	config.InMemory = false
 
-// 	time.Sleep(2 * time.Second)
-// 	leader, err := findLeader(cluster)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
+	cluster, _ := CreateLocalCluster(config)
+	defer cleanupCluster(cluster)
 
-// 	followers := make([]*Node, 0)
-// 	for _, node := range cluster {
-// 		if node != leader {
-// 			followers = append(followers, node)
-// 		}
-// 	}
+	time.Sleep(2 * time.Second)
 
-// 	// partition into 2 clusters: one with leader and first follower; other with remaining 3 followers
-// 	ff := followers[0]
-// 	for _, follower := range followers[1:] {
-// 		follower.NetworkPolicy.RegisterPolicy(*follower.Self, *ff.Self, false)
-// 		follower.NetworkPolicy.RegisterPolicy(*follower.Self, *leader.Self, false)
+	ports := make([]int, 5)
+	leader, err := findLeader(cluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ports[0] = leader.port
 
-// 		ff.NetworkPolicy.RegisterPolicy(*ff.Self, *follower.Self, false)
-// 		leader.NetworkPolicy.RegisterPolicy(*leader.Self, *follower.Self, false)
-// 	}
+	followers := make([]*Node, 0)
+	i := 1
+	for _, node := range cluster {
+		if node != leader {
+			followers = append(followers, node)
+			ports[i] = node.port
+			i++
+		}
+	}
+	port := followers[0].port
+	path := followers[0].stableStore.Path()
+	followers[0].GracefulExit()
+	time.Sleep(time.Second * WaitPeriod)
 
-// 	// allow a new leader to be elected in partition of 3 nodes
-// 	time.Sleep(time.Second * WaitPeriod)
-// 	newLeader, err := findLeader(followers)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
+	// First make sure we can register a client correctly
+	reply, _ := leader.RegisterClientCaller(context.Background(), &RegisterClientRequest{})
 
-// 	// check that old leader, which is cut off from new leader, still thinks it's leader
-// 	if leader.State != LeaderState {
-// 		t.Fatal(errors.New("leader should remain leader even when partitioned"))
-// 	}
+	if reply.Status != ClientStatus_OK {
+		t.Fatal("Counld not register client")
+	}
 
-// 	if leader.GetCurrentTerm() >= newLeader.GetCurrentTerm() {
-// 		t.Fatal(errors.New("new leader should have higher term"))
-// 	}
+	clientid := reply.ClientId
 
-// 	reply, _ := leader.RegisterClientCaller(context.Background(), &RegisterClientRequest{})
+	// Hash initialization request
+	initReq := ClientRequest{
+		ClientId:        clientid,
+		SequenceNum:     1,
+		StateMachineCmd: hashmachine.HashChainInit,
+		Data:            []byte("hello"),
+	}
+	clientResult, _ := leader.ClientRequestCaller(context.Background(), &initReq)
+	if clientResult.Status != ClientStatus_OK {
+		t.Fatal("Leader failed to commit a client request")
+	}
 
-// 	if reply.Status == ClientStatus_OK {
-// 		t.Fatal("Old leader should not be able to register client")
-// 	}
+	// Make sure further request is correct processed
+	req := ClientRequest{
+		ClientId:        1,
+		SequenceNum:     1,
+		StateMachineCmd: hashmachine.HashChainInit,
+		Data:            []byte("hello"),
+	}
+	clientResult, _ = leader.ClientRequestCaller(context.Background(), &req)
 
-// 	replyFromNew, _ := newLeader.RegisterClientCaller(context.Background(), &RegisterClientRequest{})
-// 	if replyFromNew.Status != ClientStatus_OK {
-// 		t.Fatal("New leader should be able to register client")
-// 	}
-
-// 	// send client request during partition
-// 	clientid := reply.ClientId
-
-// 	// Hash initialization request
-// 	initReq := ClientRequest{
-// 		ClientId:        clientid,
-// 		SequenceNum:     1,
-// 		StateMachineCmd: hashmachine.HashChainInit,
-// 		Data:            []byte("hello"),
-// 	}
-// 	clientResult, _ := leader.ClientRequestCaller(context.Background(), &initReq)
-// 	if clientResult.Status == ClientStatus_OK {
-// 		t.Fatal("Old leader should not be able to commit a client request")
-// 	}
-// 	clientResultNew, _ := newLeader.ClientRequestCaller(context.Background(), &initReq)
-// 	if clientResultNew.Status != ClientStatus_OK {
-// 		t.Fatal("New leader should be able to commit a client request")
-// 	}
-// 	// Make sure further request is correct processed
-// 	ClientReq := ClientRequest{
-// 		ClientId:        clientid,
-// 		SequenceNum:     2,
-// 		StateMachineCmd: hashmachine.HashChainAdd,
-// 		Data:            []byte{},
-// 	}
-// 	clientResult, _ = leader.ClientRequestCaller(context.Background(), &ClientReq)
-// 	if clientResult.Status == ClientStatus_OK {
-// 		t.Fatal("Old leader should not be able to commit a client request")
-// 	}
-// 	clientResultNew, _ = newLeader.ClientRequestCaller(context.Background(), &ClientReq)
-// 	if clientResultNew.Status == ClientStatus_OK {
-// 		t.Fatal("New leader should be able to commit a client request")
-// 	}
-// 	for _, follower := range followers[1:] {
-// 		follower.NetworkPolicy.RegisterPolicy(*follower.Self, *ff.Self, true)
-// 		follower.NetworkPolicy.RegisterPolicy(*follower.Self, *leader.Self, true)
-
-// 		ff.NetworkPolicy.RegisterPolicy(*ff.Self, *follower.Self, true)
-// 		leader.NetworkPolicy.RegisterPolicy(*leader.Self, *follower.Self, true)
-// 	}
-
-// 	// wait for larger cluster to stabilize
-// 	time.Sleep(time.Second * WaitPeriod)
-
-// 	if !logsMatch(newLeader, cluster) {
-// 		t.Errorf("logs incorrect")
-// 	}
-
-// 	// clientid := reply.ClientId
-// }
-
-// func TestClientRegistration_Leader_Partition(t *testing.T) {
-// 	suppressLoggers()
-// 	cluster, err := createTestCluster([]int{7001, 7002, 7003, 7004, 7005})
-// 	defer cleanupCluster(cluster)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	time.Sleep(2 * time.Second)
-// 	leader, err := findLeader(cluster)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	followers := make([]*Node, 0)
-// 	for _, node := range cluster {
-// 		if node != leader {
-// 			followers = append(followers, node)
-// 		}
-// 	}
-
-// 	// partition into 2 clusters: one with leader and first follower; other with remaining 3 followers
-// 	ff := followers[0]
-// 	for _, follower := range followers[1:] {
-// 		follower.NetworkPolicy.RegisterPolicy(*follower.Self, *ff.Self, false)
-// 		follower.NetworkPolicy.RegisterPolicy(*follower.Self, *leader.Self, false)
-
-// 		ff.NetworkPolicy.RegisterPolicy(*ff.Self, *follower.Self, false)
-// 		leader.NetworkPolicy.RegisterPolicy(*leader.Self, *follower.Self, false)
-// 	}
-
-// 	// allow a new leader to be elected in partition of 3 nodes
-// 	time.Sleep(time.Second * WaitPeriod)
-// 	newLeader, err := findLeader(followers)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	// check that old leader, which is cut off from new leader, still thinks it's leader
-// 	if leader.State != LeaderState {
-// 		t.Fatal(errors.New("leader should remain leader even when partitioned"))
-// 	}
-
-// 	if leader.GetCurrentTerm() >= newLeader.GetCurrentTerm() {
-// 		t.Fatal(errors.New("new leader should have higher term"))
-// 	}
-
-// 	reply, _ := leader.RegisterClientCaller(context.Background(), &RegisterClientRequest{})
-
-// 	if reply.Status == ClientStatus_OK {
-// 		t.Fatal("Old leader should not be able to register client")
-// 	}
-
-// 	replyFromNew, _ := newLeader.RegisterClientCaller(context.Background(), &RegisterClientRequest{})
-// 	if replyFromNew.Status != ClientStatus_OK {
-// 		t.Fatal("New leader should be able to register client")
-// 	}
-// 	// rejoin the cluster
-// 	for _, follower := range followers[1:] {
-// 		follower.NetworkPolicy.RegisterPolicy(*follower.Self, *ff.Self, true)
-// 		follower.NetworkPolicy.RegisterPolicy(*follower.Self, *leader.Self, true)
-
-// 		ff.NetworkPolicy.RegisterPolicy(*ff.Self, *follower.Self, true)
-// 		leader.NetworkPolicy.RegisterPolicy(*leader.Self, *follower.Self, true)
-// 	}
-
-// 	// wait for larger cluster to stabilize
-// 	time.Sleep(time.Second * WaitPeriod)
-
-// 	if !logsMatch(newLeader, cluster) {
-// 		t.Errorf("logs incorrect")
-// 	}
-
-// 	// clientid := reply.ClientId
-// }
+	time.Sleep(time.Second * WaitPeriod)
+	crahsedNode, err := CreateNode(OpenPort(port), leader.Self, DefaultConfig(), new(hashmachine.HashMachine), NewBoltStore(path))
+	time.Sleep(time.Second * WaitPeriod)
+	assert.True(t, logsMatch(crahsedNode, cluster))
+	for _, p := range ports {
+		err := os.RemoveAll(filepath.Join(os.TempDir(), fmt.Sprintf("raft%v", p)))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}

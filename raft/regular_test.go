@@ -6,6 +6,7 @@ import (
 
 	"github.com/brown-csci1380-s20/raft-yyang149-kboonyap/hashmachine"
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/net/context"
 )
 
 func TestRequestVote(t *testing.T) {
@@ -414,5 +415,137 @@ func Test_Correct_Leader_Elected(t *testing.T) {
 	time.Sleep(time.Second * WaitPeriod)
 	if !logsMatch(cluster[0], cluster) {
 		t.Errorf("logs incorrect")
+	}
+}
+
+//Duplicate request
+func TestClientInteraction_Cached_Request(t *testing.T) {
+	suppressLoggers()
+	config := DefaultConfig()
+	cluster, _ := CreateLocalCluster(config)
+	defer cleanupCluster(cluster)
+
+	time.Sleep(2 * time.Second)
+
+	leader, err := findLeader(cluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First make sure we can register a client correctly
+	reply, _ := leader.RegisterClientCaller(context.Background(), &RegisterClientRequest{})
+
+	if reply.Status != ClientStatus_OK {
+		t.Fatal("Counld not register client")
+	}
+
+	clientid := reply.ClientId
+
+	// Hash initialization request
+	initReq := ClientRequest{
+		ClientId:        clientid,
+		SequenceNum:     1,
+		StateMachineCmd: hashmachine.HashChainInit,
+		Data:            []byte("hello"),
+	}
+	clientResult, _ := leader.ClientRequestCaller(context.Background(), &initReq)
+	if clientResult.Status != ClientStatus_OK {
+		t.Fatal("Leader failed to commit a client request")
+	}
+
+	// Make sure further request is correct processed
+	ClientReq := ClientRequest{
+		ClientId:        clientid,
+		SequenceNum:     2,
+		StateMachineCmd: hashmachine.HashChainAdd,
+		Data:            []byte{},
+	}
+	clientResult, _ = leader.ClientRequestCaller(context.Background(), &ClientReq)
+	if clientResult.Status != ClientStatus_OK {
+		t.Fatal("Leader failed to commit a client request")
+	}
+	time.Sleep(2 * time.Second)
+
+	//second round same request
+	clientResult2, _ := leader.ClientRequestCaller(context.Background(), &ClientReq)
+	if clientResult2.Status != ClientStatus_OK {
+		t.Fatal("Leader failed to commit a client request")
+	}
+}
+
+func TestClientInteraction_TwoNodeCluster(t *testing.T) {
+	suppressLoggers()
+	config := DefaultConfig()
+	config.ClusterSize = 2
+	cluster, _ := CreateLocalCluster(config)
+	defer cleanupCluster(cluster)
+
+	time.Sleep(2 * time.Second)
+	leader, err := findLeader(cluster)
+	if err != nil {
+		t.Errorf("cannot find leader")
+	}
+
+	// First make sure we can register a client correctly
+	reply, _ := leader.RegisterClientCaller(context.Background(), &RegisterClientRequest{})
+
+	if reply.Status != ClientStatus_OK {
+		t.Errorf("%v", reply.Status)
+		t.Fatal("We don't have a leader yet")
+	}
+	logsMatch(leader, cluster)
+}
+
+func TestClientInteraction_Cached_Withou_Log_Processed(t *testing.T) {
+	suppressLoggers()
+	config := DefaultConfig()
+	cluster, _ := CreateLocalCluster(config)
+	defer cleanupCluster(cluster)
+
+	time.Sleep(2 * time.Second)
+
+	leader, err := findLeader(cluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First make sure we can register a client correctly
+	reply, _ := leader.RegisterClientCaller(context.Background(), &RegisterClientRequest{})
+
+	if reply.Status != ClientStatus_OK {
+		t.Fatal("Counld not register client")
+	}
+
+	clientid := reply.ClientId
+
+	// Hash initialization request
+	initReq := ClientRequest{
+		ClientId:        clientid,
+		SequenceNum:     1,
+		StateMachineCmd: hashmachine.HashChainInit,
+		Data:            []byte("hello"),
+	}
+	clientResult, _ := leader.ClientRequestCaller(context.Background(), &initReq)
+	if clientResult.Status != ClientStatus_OK {
+		t.Fatal("Leader failed to commit a client request")
+	}
+
+	// Make sure further request is correct processed
+	ClientReq := ClientRequest{
+		ClientId:        clientid,
+		SequenceNum:     2,
+		StateMachineCmd: hashmachine.HashChainAdd,
+		Data:            []byte{22, 33},
+	}
+	clientResult, _ = leader.ClientRequestCaller(context.Background(), &ClientReq)
+	if clientResult.Status != ClientStatus_OK {
+		t.Fatal("Leader failed to commit a client request")
+	}
+	// time.Sleep(2 * time.Second)
+
+	//second round same request
+	clientResult2, _ := leader.ClientRequestCaller(context.Background(), &ClientReq)
+	if clientResult2.Status != ClientStatus_OK {
+		t.Fatal("Leader failed to commit a client request")
 	}
 }

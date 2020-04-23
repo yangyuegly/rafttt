@@ -109,7 +109,9 @@ func (r *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 	if req.Term > r.GetCurrentTerm() {
 		r.setCurrentTerm(req.Term)
 		r.setVotedFor("")
-		fallback = true
+		if r.State != FollowerState {
+			fallback = true
+		}
 		resetTimeout = true
 	} else {
 		// req.Term == r.GetCurrentTerm()
@@ -129,7 +131,7 @@ func (r *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 			Term:    r.GetCurrentTerm(),
 			Success: false,
 		}
-		return true, true
+		return true, fallback
 	}
 	// implmentation 3-5
 	// check for conflict
