@@ -12,6 +12,8 @@
 - TestAppendEntries_Case4: check appending multiple entries logs match
 - TestInit_Follower: check if node stays a follower with long election timeout
 - Test_Correct_Leader_Elected: check if the correct leader is elected and logs replicated
+- TestClientInteraction_Cached_Request: test if client respond to a duplicate request from the cache
+- TestLeaderHandleCompetingVotes: check handle request vote behavior in leader correctly grant votes.
 
 # partition_test:
 
@@ -20,3 +22,4 @@
 - TestClientInteraction_Partition: test client interaction with partitioned cluster; make sure client cannot successfuly send a request to a partitioned follower, and logs are replicated once the partition healed.
 - TestClientInteraction_Cached_Request: duplicate client request to leader
 - TestShutDown:Make sure that follower can shutdown and recover without disturbing the cluster.
+- Test_CacheReply_WO_Processed: test if the node can respond to duplicate request before the log is processed.

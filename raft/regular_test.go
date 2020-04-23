@@ -496,7 +496,14 @@ func TestClientInteraction_TwoNodeCluster(t *testing.T) {
 	logsMatch(leader, cluster)
 }
 
-func TestClientInteraction_Cached_Withou_Log_Processed(t *testing.T) {
+//make a cluster
+//find a leader
+//manually make a request
+//do a vote message
+
+//send a request with the partition
+
+func TestLeaderHandleCompetingVotes(t *testing.T) {
 	suppressLoggers()
 	config := DefaultConfig()
 	cluster, _ := CreateLocalCluster(config)
@@ -508,44 +515,20 @@ func TestClientInteraction_Cached_Withou_Log_Processed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// First make sure we can register a client correctly
-	reply, _ := leader.RegisterClientCaller(context.Background(), &RegisterClientRequest{})
-
-	if reply.Status != ClientStatus_OK {
-		t.Fatal("Counld not register client")
+	followers := make([]*Node, 0)
+	for _, node := range cluster {
+		if node != leader {
+			followers = append(followers, node)
+		}
+	}
+	req := &RequestVoteRequest{
+		Term:         5,
+		Candidate:    followers[0].Self,
+		LastLogIndex: 4,
+		LastLogTerm:  4,
 	}
 
-	clientid := reply.ClientId
+	reply := leader.RequestVote(req)
 
-	// Hash initialization request
-	initReq := ClientRequest{
-		ClientId:        clientid,
-		SequenceNum:     1,
-		StateMachineCmd: hashmachine.HashChainInit,
-		Data:            []byte("hello"),
-	}
-	clientResult, _ := leader.ClientRequestCaller(context.Background(), &initReq)
-	if clientResult.Status != ClientStatus_OK {
-		t.Fatal("Leader failed to commit a client request")
-	}
-
-	// Make sure further request is correct processed
-	ClientReq := ClientRequest{
-		ClientId:        clientid,
-		SequenceNum:     2,
-		StateMachineCmd: hashmachine.HashChainAdd,
-		Data:            []byte{22, 33},
-	}
-	clientResult, _ = leader.ClientRequestCaller(context.Background(), &ClientReq)
-	if clientResult.Status != ClientStatus_OK {
-		t.Fatal("Leader failed to commit a client request")
-	}
-	// time.Sleep(2 * time.Second)
-
-	//second round same request
-	clientResult2, _ := leader.ClientRequestCaller(context.Background(), &ClientReq)
-	if clientResult2.Status != ClientStatus_OK {
-		t.Fatal("Leader failed to commit a client request")
-	}
+	assert.True(t, reply.VoteGranted)
 }
