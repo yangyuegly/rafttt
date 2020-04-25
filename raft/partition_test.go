@@ -2,9 +2,6 @@ package raft
 
 import (
 	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -157,7 +154,7 @@ func TestClientInteraction_Partition(t *testing.T) {
 	cluster, err := createTestCluster([]int{6001, 6002, 6003, 6004, 6005})
 	defer cleanupCluster(cluster)
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(WaitPeriod * time.Second)
 
 	leader, err := findLeader(cluster)
 	if err != nil {
@@ -238,37 +235,18 @@ func TestClientInteraction_Partition(t *testing.T) {
 }
 
 func TestShutDown(t *testing.T) {
-	suppressLoggers()
 	config := DefaultConfig()
-	config.InMemory = false
+	config.ClusterSize = 5
 
 	cluster, _ := CreateLocalCluster(config)
 	defer cleanupCluster(cluster)
 
-	time.Sleep(2 * time.Second)
-
-	ports := make([]int, 5)
+	time.Sleep(time.Second * WaitPeriod)
 	leader, err := findLeader(cluster)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ports[0] = leader.port
 
-	followers := make([]*Node, 0)
-	i := 1
-	for _, node := range cluster {
-		if node != leader {
-			followers = append(followers, node)
-			ports[i] = node.port
-			i++
-		}
-	}
-	port := followers[0].port
-	path := followers[0].stableStore.Path()
-	followers[0].GracefulExit()
-	time.Sleep(time.Second * WaitPeriod)
-
-	// First make sure we can register a client correctly
 	reply, _ := leader.RegisterClientCaller(context.Background(), &RegisterClientRequest{})
 
 	if reply.Status != ClientStatus_OK {
@@ -276,7 +254,6 @@ func TestShutDown(t *testing.T) {
 	}
 
 	clientid := reply.ClientId
-
 	// Hash initialization request
 	initReq := ClientRequest{
 		ClientId:        clientid,
@@ -290,24 +267,23 @@ func TestShutDown(t *testing.T) {
 	}
 
 	// Make sure further request is correct processed
-	req := ClientRequest{
-		ClientId:        1,
-		SequenceNum:     1,
-		StateMachineCmd: hashmachine.HashChainInit,
-		Data:            []byte("hello"),
+	clientResult, _ = leader.ClientRequestCaller(context.Background(), &initReq)
+	if clientResult.Status != ClientStatus_OK {
+		t.Fatalf("Leader failed to commit a client request: %v", clientResult.Status)
 	}
-	clientResult, _ = leader.ClientRequestCaller(context.Background(), &req)
 
+	port := cluster[0].port
+	cluster[0].GracefulExit()
 	time.Sleep(time.Second * WaitPeriod)
-	crashedNode, err := CreateNode(OpenPort(port), leader.Self, config, new(hashmachine.HashMachine), NewBoltStore(path))
-	time.Sleep(time.Second * WaitPeriod)
-	assert.True(t, logsMatch(crashedNode, cluster))
-	for _, p := range ports {
-		err := os.RemoveAll(filepath.Join(os.TempDir(), fmt.Sprintf("raft%v", p)))
-		if err != nil {
-			t.Fatal(err)
-		}
+	leader, err = findLeader(cluster)
+	if err != nil {
+		t.Fatal(err)
 	}
+
+	cluster[0], err = CreateNode(OpenPort(port), leader.Self, config, new(hashmachine.HashMachine), NewMemoryStore())
+	time.Sleep(time.Second * WaitPeriod)
+
+	assert.True(t, logsMatch(leader, cluster))
 }
 
 func Test_CacheReply_WO_Processed(t *testing.T) {
