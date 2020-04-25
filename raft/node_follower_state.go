@@ -172,7 +172,9 @@ func (r *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 		}
 
 		for i := r.lastApplied + 1; i <= r.commitIndex; i++ {
-			r.processLogEntry(*r.GetLog(i))
+			if r.GetLog(i) != nil {
+				r.processLogEntry(*r.GetLog(i))
+			}
 			r.lastApplied = i
 		}
 	}

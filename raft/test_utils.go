@@ -62,6 +62,40 @@ func logsMatch(leader *Node, nodes []*Node) bool {
 	return true
 }
 
+// Returns whether all log terms in a cluster match the leader's.
+func logsTermsMatch(leader *Node, nodes []*Node) bool {
+	leadInd := leader.LastLogIndex()
+	for _, node := range nodes {
+		lastInd := node.LastLogIndex()
+		if lastInd != leadInd {
+			return false
+		}
+
+		for i := uint64(0); i <= node.LastLogIndex(); i++ {
+			nodelog := node.GetLog(i)
+			leadlog := leader.GetLog(i)
+			if nodelog == nil ||
+				bytes.Compare(nodelog.Data, leadlog.Data) != 0 ||
+				nodelog.Index != leadlog.Index ||
+				nodelog.TermId != leadlog.TermId ||
+				nodelog.Type != leadlog.Type ||
+				nodelog.Command != leadlog.Command {
+
+				return false
+			}
+		}
+	}
+	return true
+}
+func storeLogsUpto(node *Node, index uint64) {
+	for i := uint64(0); i <= index; i++ {
+		node.StoreLog(&LogEntry{
+			Index:  i,
+			TermId: 1,
+		})
+	}
+}
+
 // Given a slice of RaftNodes representing a cluster,
 // exits each node and removes its logs.
 func cleanupCluster(nodes []*Node) {

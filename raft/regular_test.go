@@ -130,6 +130,7 @@ func TestAppendEntries(t *testing.T) {
 	//higher_term/higher_last_log_index/lower_last_log_term
 	node1.setCurrentTerm(2)
 	node2.setCurrentTerm(1)
+
 	node1.StoreLog(&LogEntry{
 		Index:  2,
 		TermId: 1,

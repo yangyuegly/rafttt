@@ -299,9 +299,9 @@ func TestShutDown(t *testing.T) {
 	clientResult, _ = leader.ClientRequestCaller(context.Background(), &req)
 
 	time.Sleep(time.Second * WaitPeriod)
-	crahsedNode, err := CreateNode(OpenPort(port), leader.Self, DefaultConfig(), new(hashmachine.HashMachine), NewBoltStore(path))
+	crashedNode, err := CreateNode(OpenPort(port), leader.Self, config, new(hashmachine.HashMachine), NewBoltStore(path))
 	time.Sleep(time.Second * WaitPeriod)
-	assert.True(t, logsMatch(crahsedNode, cluster))
+	assert.True(t, logsMatch(crashedNode, cluster))
 	for _, p := range ports {
 		err := os.RemoveAll(filepath.Join(os.TempDir(), fmt.Sprintf("raft%v", p)))
 		if err != nil {
@@ -387,8 +387,8 @@ func Test_CacheReply_WO_Processed(t *testing.T) {
 		<-doneCh
 	}
 
-	for _, node := range cluster {
-		node.Out("Log %v, %v, %v, %v", node.LastLogIndex(), node.LastLogTerm(), node.commitIndex, node.lastApplied)
-	}
+	// for _, node := range cluster {
+	// 	node.Out("Log %v, %v, %v, %v", node.LastLogIndex(), node.LastLogTerm(), node.commitIndex, node.lastApplied)
+	// }
 	assert.True(t, logsMatch(leader, cluster))
 }
