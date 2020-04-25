@@ -2,6 +2,9 @@ package raft
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -221,14 +224,20 @@ func TestClientInteraction_Partition(t *testing.T) {
 func TestShutDown(t *testing.T) {
 	config := DefaultConfig()
 	config.ClusterSize = 5
+	cluster, err := CreateLocalCluster(config)
 
-	cluster, _ := CreateLocalCluster(config)
 	defer cleanupCluster(cluster)
 
 	time.Sleep(time.Second * WaitPeriod)
 	leader, err := findLeader(cluster)
 	if err != nil {
 		t.Fatal(err)
+	}
+	followers := make([]*Node, 0)
+	for _, node := range cluster {
+		if node != leader {
+			followers = append(followers, node)
+		}
 	}
 
 	reply, _ := leader.RegisterClientCaller(context.Background(), &RegisterClientRequest{})
@@ -237,6 +246,7 @@ func TestShutDown(t *testing.T) {
 		t.Fatal("Counld not register client")
 	}
 
+	time.Sleep(time.Second * WaitPeriod) //wait to replicate
 	clientid := reply.ClientId
 	// Hash initialization request
 	initReq := ClientRequest{
@@ -245,29 +255,31 @@ func TestShutDown(t *testing.T) {
 		StateMachineCmd: hashmachine.HashChainInit,
 		Data:            []byte("hello"),
 	}
+
+	// Make sure further request is correct processed
+
+	port := followers[0].port
+	followers[0].GracefulExit()
+	time.Sleep(time.Second * WaitPeriod)
+	if err != nil {
+		t.Fatal(err)
+	}
 	clientResult, _ := leader.ClientRequestCaller(context.Background(), &initReq)
 	if clientResult.Status != ClientStatus_OK {
 		t.Fatal("Leader failed to commit a client request")
 	}
 
-	// Make sure further request is correct processed
-	clientResult, _ = leader.ClientRequestCaller(context.Background(), &initReq)
-	if clientResult.Status != ClientStatus_OK {
-		t.Fatalf("Leader failed to commit a client request: %v", clientResult.Status)
-	}
-
-	port := cluster[0].port
-	cluster[0].GracefulExit()
-	time.Sleep(time.Second * WaitPeriod)
-	leader, err = findLeader(cluster)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cluster[0], err = CreateNode(OpenPort(port), leader.Self, config, new(hashmachine.HashMachine), NewMemoryStore())
+	followers[0], err = CreateNode(OpenPort(port), leader.Self, config, new(hashmachine.HashMachine), NewMemoryStore())
 	time.Sleep(time.Second * WaitPeriod)
 
-	assert.True(t, logsMatch(leader, cluster))
+	assert.True(t, logsMatch(followers[0], cluster))
+	ports := []int{7001, 7002, 7003, 7004, 7005}
+	for _, p := range ports {
+		err := os.RemoveAll(filepath.Join(os.TempDir(), fmt.Sprintf("raft%v", p)))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func Test_CacheReply_WO_Processed(t *testing.T) {

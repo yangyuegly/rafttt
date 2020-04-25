@@ -375,7 +375,7 @@ func TestInit_Follower(t *testing.T) {
 func Test_Correct_Leader_Elected(t *testing.T) {
 	suppressLoggers()
 
-	cluster, err := createTestCluster([]int{7001, 7002, 7003, 7004, 7005})
+	cluster, err := createTestCluster([]int{7006, 7007, 7008, 7009, 7010})
 	defer cleanupCluster(cluster)
 	if err != nil {
 		t.Fatal(err)
