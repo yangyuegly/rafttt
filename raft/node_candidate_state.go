@@ -27,7 +27,7 @@ func (r *Node) doCandidate() stateFunction {
 			}
 		case reqVote := <-r.requestVote:
 			fallback, voteGranted := r.handleCompetingRequestVote(reqVote)
-
+			r.Out("Receiving Request Vote: %v, verdict %v", reqVote.request, voteGranted)
 			reqVote.reply <- RequestVoteReply{
 				Term:        r.GetCurrentTerm(),
 				VoteGranted: voteGranted,
@@ -50,6 +50,7 @@ func (r *Node) doCandidate() stateFunction {
 			}
 		case <-timeout:
 			// start a new election
+			r.Out("Timeout, starting a new election")
 			r.setCurrentTerm(r.GetCurrentTerm() + 1)
 			r.setVotedFor(r.Self.Id)
 			electionResults = make(chan bool, 1)
@@ -111,6 +112,7 @@ func (r *Node) requestVotes(electionResults chan bool, fallback chan bool, currT
 		res := <-votesChan
 		if res {
 			votesCount++
+			r.Out("Getting Votes: %v", votesCount)
 			if votesCount >= majority {
 				electionResults <- true
 				return

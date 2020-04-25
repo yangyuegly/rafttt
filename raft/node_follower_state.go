@@ -5,6 +5,16 @@ func (r *Node) doFollower() stateFunction {
 	r.Out("Transitioning to FollowerState")
 	r.State = FollowerState
 
+	// flush all the cached request
+	for k, v := range r.requestsByCacheID {
+		v <- ClientReply{
+			Status:     ClientStatus_NOT_LEADER,
+			Response:   nil,
+			LeaderHint: r.Leader,
+		}
+		delete(r.requestsByCacheID, k)
+	}
+
 	timeout := randomTimeout(r.config.ElectionTimeout)
 
 	for {
@@ -23,6 +33,7 @@ func (r *Node) doFollower() stateFunction {
 			voteGranted, currTerm := r.processVoteRequest(reqVote.request)
 
 			if voteGranted {
+				r.Out("Resetting Timeout")
 				timeout = randomTimeout(r.config.ElectionTimeout)
 			}
 
@@ -61,12 +72,13 @@ func (r *Node) processVoteRequest(req *RequestVoteRequest) (voteGranted bool, te
 	if req.Term > currTerm {
 		r.Out("request term higher and has not voted: update our term")
 		r.setCurrentTerm(req.Term)
+		r.setVotedFor("")
 		currTerm = req.Term
 	}
 
 	if r.isUpToDate(req.LastLogTerm, req.LastLogIndex) {
-		r.Out("request term up-to-date and has not voted: grant vote")
 		if voted == "" || voted == req.Candidate.Id {
+			r.Out("request term up-to-date and has not voted: grant vote")
 			r.setVotedFor(req.Candidate.Id)
 			return true, currTerm
 		}
@@ -143,7 +155,7 @@ func (r *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 	}
 
 	// append entries
-	var lastNewEntry uint64
+	lastNewEntry := r.LastLogIndex()
 	for _, en := range req.Entries {
 		if r.GetLog(en.Index) == nil {
 			r.StoreLog(en)
@@ -157,6 +169,11 @@ func (r *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 			r.commitIndex = lastNewEntry
 		} else {
 			r.commitIndex = req.LeaderCommit
+		}
+
+		for i := r.lastApplied + 1; i <= r.commitIndex; i++ {
+			r.processLogEntry(*r.GetLog(i))
+			r.lastApplied = i
 		}
 	}
 

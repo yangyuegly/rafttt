@@ -15,8 +15,6 @@ func (r *Node) doLeader() stateFunction {
 	r.Leader = r.Self
 
 	r.leaderMutex.Lock()
-	r.commitIndex = 0
-	r.lastApplied = 0
 	initNext := r.LastLogIndex() + 1
 	for _, p := range r.Peers {
 		r.nextIndex[p.Id] = initNext
@@ -103,16 +101,19 @@ func (r *Node) doLeader() stateFunction {
 			oldReply, isDuplicate := r.GetCachedReply(*cliReq.request)
 			if isDuplicate {
 				// come after state machine runs
+				r.Out("Response with cached reply")
 				cliReq.reply <- *oldReply
 			} else if r.requestsByCacheID[cacheID] == nil {
 				// the first request
 				r.requestsByCacheID[cacheID] = cliReq.reply
 			} else {
 				// not the first request, but before the log precessed
-				ch := make(chan ClientReply)
-				r.requestsByCacheID[cacheID] = ch
+				r.Out("Construct a reply channel")
 				reply1 := r.requestsByCacheID[cacheID]
 				reply2 := cliReq.reply
+
+				ch := make(chan ClientReply, 1)
+				r.requestsByCacheID[cacheID] = ch
 				go func() {
 					msg := <-ch
 					reply1 <- msg
@@ -296,10 +297,12 @@ func (r *Node) checkForCommit() {
 	}
 
 	if newCommit > r.commitIndex && r.GetLog(newCommit).TermId == r.GetCurrentTerm() {
-		for i := r.commitIndex + 1; i <= newCommit; i++ {
-			r.processLogEntry(*r.GetLog(i))
-		}
 		r.commitIndex = newCommit
+
+		for i := r.lastApplied + 1; i <= r.commitIndex; i++ {
+			r.processLogEntry(*r.GetLog(i))
+			r.lastApplied = i
+		}
 	}
 }
 
