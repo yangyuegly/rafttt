@@ -151,7 +151,7 @@ func Test_One_Follower_Partitioned(t *testing.T) {
 
 func TestClientInteraction_Partition(t *testing.T) {
 	suppressLoggers()
-	cluster, err := createTestCluster([]int{6001, 6002, 6003, 6004, 6005})
+	cluster, err := createTestCluster([]int{7001, 7002, 7003, 7004, 7005})
 	defer cleanupCluster(cluster)
 
 	time.Sleep(WaitPeriod * time.Second)
@@ -174,8 +174,6 @@ func TestClientInteraction_Partition(t *testing.T) {
 		follower.NetworkPolicy.RegisterPolicy(*follower.Self, *ff.Self, false)
 		ff.NetworkPolicy.RegisterPolicy(*ff.Self, *follower.Self, false)
 	}
-	leader.NetworkPolicy.RegisterPolicy(*leader.Self, *ff.Self, false)
-	leader.NetworkPolicy.RegisterPolicy(*ff.Self, *leader.Self, false)
 
 	//
 	time.Sleep(time.Second * WaitPeriod)
@@ -199,22 +197,10 @@ func TestClientInteraction_Partition(t *testing.T) {
 		StateMachineCmd: hashmachine.HashChainInit,
 		Data:            []byte("hello"),
 	}
-	clientResult, _ := leader.ClientRequestCaller(context.Background(), &initReq)
-	if reply.Status != ClientStatus_OK {
+
+	reply2, _ := leader.ClientRequestCaller(context.Background(), &initReq)
+	if reply2.Status != ClientStatus_OK {
 		t.Fatal("Leader failed to commit a client request")
-	}
-
-	// Make sure further request is correct processed
-	req := ClientRequest{
-		ClientId:        1,
-		SequenceNum:     1,
-		StateMachineCmd: hashmachine.HashChainInit,
-		Data:            []byte("hello"),
-	}
-
-	clientResult, _ = cluster[0].ClientRequestCaller(context.Background(), &req)
-	if clientResult.Status != ClientStatus_REQ_FAILED && clientResult.Status != ClientStatus_ELECTION_IN_PROGRESS {
-		t.Fatal("Wrong response when sending a client request to a partitioned follower")
 	}
 
 	// rejoin the cluster
@@ -222,8 +208,6 @@ func TestClientInteraction_Partition(t *testing.T) {
 		follower.NetworkPolicy.RegisterPolicy(*follower.Self, *ff.Self, true)
 		ff.NetworkPolicy.RegisterPolicy(*ff.Self, *follower.Self, true)
 	}
-	leader.NetworkPolicy.RegisterPolicy(*leader.Self, *ff.Self, true)
-	leader.NetworkPolicy.RegisterPolicy(*ff.Self, *leader.Self, true)
 
 	// wait for larger cluster to stabilize
 	time.Sleep(time.Second * WaitPeriod)
