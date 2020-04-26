@@ -5,6 +5,10 @@ func (r *Node) doFollower() stateFunction {
 	r.Out("Transitioning to FollowerState")
 	r.State = FollowerState
 
+	if r.Leader == nil {
+		r.Leader = r.Self
+	}
+
 	// flush all the cached request
 	for k, v := range r.requestsByCacheID {
 		v <- ClientReply{

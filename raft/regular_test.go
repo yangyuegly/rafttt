@@ -533,3 +533,54 @@ func TestLeaderHandleCompetingVotes(t *testing.T) {
 
 	assert.True(t, reply.VoteGranted)
 }
+
+func TestCandidateFallback(t *testing.T) {
+	suppressLoggers()
+	config := DefaultConfig()
+	config.ClusterSize = 3
+	config.ElectionTimeout = time.Millisecond * 150
+	cluster, err := CreateLocalCluster(config)
+	defer cleanupCluster(cluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// cluster[0] should prevent other from getting elected
+	cluster[0].config.ElectionTimeout = time.Second * 30
+	cluster[0].setCurrentTerm(20)
+	ticker := time.NewTicker(config.ElectionTimeout)
+	defer ticker.Stop()
+
+	cancelTick := make(chan bool)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				cluster[0].setCurrentTerm(cluster[0].GetCurrentTerm() + 2)
+			case <-cancelTick:
+				return
+			}
+		}
+	}()
+
+	defer func() {
+		cancelTick <- true
+	}()
+
+	// reset timeout on cluster[0]
+	cluster[0].AppendEntries(&AppendEntriesRequest{
+		Term:         20,
+		Leader:       cluster[0].Self,
+		PrevLogIndex: 0,
+		PrevLogTerm:  0,
+		Entries:      nil,
+		LeaderCommit: 0,
+	})
+
+	time.Sleep(time.Second * WaitPeriod)
+	for _, node := range cluster {
+		if node.State == LeaderState {
+			t.Errorf("Found an elected leader! %v", node.Self.Id)
+		}
+	}
+}

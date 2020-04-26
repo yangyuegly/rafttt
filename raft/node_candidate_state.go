@@ -4,6 +4,7 @@ package raft
 func (r *Node) doCandidate() stateFunction {
 	r.Out("Transitioning to CandidateState")
 	r.State = CandidateState
+	r.Leader = r.Self
 
 	r.setCurrentTerm(r.GetCurrentTerm() + 1)
 	r.setVotedFor(r.Self.Id)
