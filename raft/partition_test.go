@@ -225,7 +225,9 @@ func TestShutDown(t *testing.T) {
 	config := DefaultConfig()
 	config.ClusterSize = 5
 	cluster, err := createTestCluster([]int{7001, 7002, 7003, 7004, 7005})
-
+	for _, node := range cluster {
+		node.config.InMemory = false
+	}
 	defer cleanupCluster(cluster)
 
 	time.Sleep(time.Second * WaitPeriod)
