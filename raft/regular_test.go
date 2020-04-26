@@ -545,9 +545,14 @@ func TestCandidateFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// cluster[0] should prevent other from getting elected
-	cluster[0].config.ElectionTimeout = time.Second * 30
+	// cluster[0] and cluster[1] should prevent other from getting elected
+	config2 := DefaultConfig()
+	config2.ClusterSize = 3
+	config2.ElectionTimeout = time.Second * 30
+	cluster[0].config = config2
 	cluster[0].setCurrentTerm(20)
+	cluster[1].config = config2
+	cluster[1].setCurrentTerm(20)
 	ticker := time.NewTicker(config.ElectionTimeout)
 	defer ticker.Stop()
 
@@ -557,6 +562,7 @@ func TestCandidateFallback(t *testing.T) {
 			select {
 			case <-ticker.C:
 				cluster[0].setCurrentTerm(cluster[0].GetCurrentTerm() + 2)
+				cluster[1].setCurrentTerm(cluster[1].GetCurrentTerm() + 2)
 			case <-cancelTick:
 				return
 			}
@@ -567,15 +573,17 @@ func TestCandidateFallback(t *testing.T) {
 		cancelTick <- true
 	}()
 
-	// reset timeout on cluster[0]
-	cluster[0].AppendEntries(&AppendEntriesRequest{
+	// reset timeout on cluster[0, 1]
+	heartbeatReq := &AppendEntriesRequest{
 		Term:         20,
 		Leader:       cluster[0].Self,
 		PrevLogIndex: 0,
 		PrevLogTerm:  0,
 		Entries:      nil,
 		LeaderCommit: 0,
-	})
+	}
+	cluster[0].AppendEntries(heartbeatReq)
+	cluster[1].AppendEntries(heartbeatReq)
 
 	time.Sleep(time.Second * WaitPeriod)
 	for _, node := range cluster {

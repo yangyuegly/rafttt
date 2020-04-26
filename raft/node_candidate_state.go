@@ -65,6 +65,7 @@ func (r *Node) doCandidate() stateFunction {
 			}
 		case fall := <-fallback:
 			if fall {
+				r.Out("Falling back..")
 				return r.doFollower
 			}
 		}
