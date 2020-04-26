@@ -32,14 +32,14 @@ func (r *Node) doLeader() stateFunction {
 		CacheId: "",
 	})
 	r.leaderMutex.Unlock()
-	fallback, sentToMajority := r.sendHeartbeats()
+	fallback, _ := r.sendHeartbeats()
 	if fallback {
 		return r.doFollower
 	}
 
-	if !sentToMajority {
-		r.Out("Warning: cannot talk to the majority of nodes")
-	}
+	// if !sentToMajority {
+	// 	r.Out("Warning: cannot talk to the majority of nodes")
+	// }
 
 	ticker := time.NewTicker(r.config.HeartbeatTimeout)
 	defer ticker.Stop()
@@ -136,12 +136,6 @@ func (r *Node) doLeader() stateFunction {
 			fallback, _ := r.sendHeartbeats()
 
 			if fallback {
-				cliReq.reply <- ClientReply{
-					Status:     ClientStatus_NOT_LEADER,
-					Response:   nil,
-					LeaderHint: r.Leader,
-				}
-
 				return r.doFollower
 			}
 		case <-ticker.C:
@@ -186,9 +180,6 @@ func (r *Node) sendHeartbeats() (fallback, sentToMajority bool) {
 					// sent out everything from nextIndex -> lastLogIndex
 					r.leaderMutex.Lock()
 					nxtInd := r.nextIndex[p.Id]
-					if nxtInd <= 0 {
-						panic("Assertion nxtInd > 0 failed")
-					}
 
 					lastInd := r.LastLogIndex()
 					var ensToSend []*LogEntry
