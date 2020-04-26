@@ -224,7 +224,7 @@ func TestClientInteraction_Partition(t *testing.T) {
 func TestShutDown(t *testing.T) {
 	config := DefaultConfig()
 	config.ClusterSize = 5
-	cluster, err := CreateLocalCluster(config)
+	cluster, err := createTestCluster([]int{7001, 7002, 7003, 7004, 7005})
 
 	defer cleanupCluster(cluster)
 
@@ -233,11 +233,11 @@ func TestShutDown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	followers := make([]*Node, 0)
-	for _, node := range cluster {
-		if node != leader {
-			followers = append(followers, node)
-		}
+	var index int
+	if cluster[0] != leader {
+		index = 0
+	} else {
+		index = 1
 	}
 
 	reply, _ := leader.RegisterClientCaller(context.Background(), &RegisterClientRequest{})
@@ -258,8 +258,9 @@ func TestShutDown(t *testing.T) {
 
 	// Make sure further request is correct processed
 
-	port := followers[0].port
-	followers[0].GracefulExit()
+	port := cluster[index].port
+	cluster[index].GracefulExit()
+	path := cluster[index].stableStore.Path()
 	time.Sleep(time.Second * WaitPeriod)
 	if err != nil {
 		t.Fatal(err)
@@ -269,10 +270,10 @@ func TestShutDown(t *testing.T) {
 		t.Fatal("Leader failed to commit a client request")
 	}
 
-	followers[0], err = CreateNode(OpenPort(port), leader.Self, config, new(hashmachine.HashMachine), NewMemoryStore())
+	cluster[index], err = CreateNode(OpenPort(port), leader.Self, config, new(hashmachine.HashMachine), NewBoltStore(path))
 	time.Sleep(time.Second * WaitPeriod)
 
-	assert.True(t, logsMatch(followers[0], cluster))
+	assert.True(t, logsMatch(cluster[0], cluster))
 	ports := []int{7001, 7002, 7003, 7004, 7005}
 	for _, p := range ports {
 		err := os.RemoveAll(filepath.Join(os.TempDir(), fmt.Sprintf("raft%v", p)))
