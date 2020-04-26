@@ -222,10 +222,11 @@ func TestClientInteraction_Partition(t *testing.T) {
 }
 
 func TestShutDown(t *testing.T) {
+	ports := []int{7101, 7102, 7103, 7104, 7105}
 	config := DefaultConfig()
 	config.ClusterSize = 5
 	config.InMemory = false
-	cluster, err := CreateDefinedLocalCluster(config, []int{7001, 7002, 7003, 7004, 7005})
+	cluster, err := CreateDefinedLocalCluster(config, ports)
 
 	defer cleanupCluster(cluster)
 
@@ -283,7 +284,6 @@ func TestShutDown(t *testing.T) {
 	time.Sleep(time.Second * WaitPeriod)
 
 	assert.True(t, logsMatch(cluster[0], cluster))
-	ports := []int{7001, 7002, 7003, 7004, 7005}
 	for _, p := range ports {
 		err := os.RemoveAll(filepath.Join(os.TempDir(), fmt.Sprintf("raft%v", p)))
 		if err != nil {
