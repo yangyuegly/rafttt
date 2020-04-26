@@ -229,11 +229,19 @@ func TestShutDown(t *testing.T) {
 
 	defer cleanupCluster(cluster)
 
-	time.Sleep(time.Second * WaitPeriod)
-	leader, err := findLeader(cluster)
-	if err != nil {
+	var leader *Node
+	for i := 0; i < 3; i++ {
+		time.Sleep(time.Second * WaitPeriod)
+		leader, err = findLeader(cluster)
+		if leader != nil {
+			break
+		}
+	}
+
+	if leader == nil {
 		t.Fatal(err)
 	}
+
 	var index int
 	if cluster[0] != leader {
 		index = 0
